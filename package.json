@@ -1,0 +1,11 @@
+{
+  "name": "pk-ext",
+  "private": true,
+  "description": "Cockpit local e userscript para o Poke Idle World",
+  "scripts": {
+    "start": "node cockpit/server.js"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

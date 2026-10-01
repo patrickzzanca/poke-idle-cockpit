@@ -1,0 +1,14 @@
+cockpit/accounts.json
+cockpit/accounts.json.*
+cockpit/config.json
+cockpit/machine.json
+cockpit/.cache/
+editado.js
+script-original.js
+*.tmp
+*.bak
+*.log
+node_modules/
+.claude/
+.env
+.env.*

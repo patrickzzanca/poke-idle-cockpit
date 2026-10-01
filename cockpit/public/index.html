@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cockpit PIW</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="top">
+    <h1>🎮 Cockpit PIW</h1>
+    <nav class="tabs">
+      <button data-tab="contas" class="on">Contas</button>
+      <button data-tab="colecao">Coleção</button>
+      <button data-tab="destaques">Destaques</button>
+      <button data-tab="mercado">Mercado</button>
+    </nav>
+    <div class="top-actions">
+      <span id="conn" class="dot bad" title="Conexão com o cockpit"></span>
+      <button id="add-account">+ Conta</button>
+    </div>
+  </header>
+
+  <main>
+    <section id="tab-contas" class="tab">
+      <div id="warnings"></div>
+      <div id="totals" class="totals"></div>
+      <div id="accounts" class="accounts"></div>
+      <div class="panel">
+        <h2>Eventos</h2>
+        <ul id="logs" class="logs"></ul>
+      </div>
+    </section>
+
+    <section id="tab-colecao" class="tab" hidden>
+      <div class="controls">
+        <label>Conta <select id="col-account"></select></label>
+        <label>Tag <select id="col-tag"><option value="">Todas</option></select></label>
+        <label>Tipo <select id="col-type"><option value="">Todos</option></select></label>
+        <label>Busca <input id="col-text" placeholder="Charizard"></label>
+        <button id="col-select-all" type="button" class="small">Selecionar tudo</button>
+        <button id="col-select-none" type="button" class="small">Desmarcar</button>
+        <span id="col-count" class="muted"></span>
+        <button id="col-sell" class="danger">Vender selecionados</button>
+      </div>
+      <div class="table-wrap"><table id="col-table"></table></div>
+    </section>
+
+    <section id="tab-destaques" class="tab" hidden>
+      <div class="controls">
+        <label>Conta <select id="hl-account"><option value="">Todas</option></select></label>
+        <label>Tag <select id="hl-tag"><option value="">Todas</option></select></label>
+        <span id="hl-junk" class="muted"></span>
+      </div>
+      <ul id="highlights" class="highlights"></ul>
+    </section>
+
+    <section id="tab-mercado" class="tab" hidden>
+      <div class="controls">
+        <label>Comparar com <select id="mk-account"></select></label>
+        <label>Tag <select id="mk-tag"><option value="all">Qualquer tag</option></select></label>
+        <label>Elemento <select id="mk-element"><option value="">Todos</option></select></label>
+        <label>Ordenar <select id="mk-sort"><option value="iv">Maior IV</option><option value="quality">Maior Q</option><option value="price">Menor preço</option></select></label>
+        <button id="mk-search">Buscar todas as páginas</button>
+        <button id="mk-cancel" hidden>Cancelar</button>
+      </div>
+      <p id="mk-status" class="muted">Nenhuma compra é feita aqui; só leitura dos anúncios.</p>
+      <div id="mk-results" class="market"></div>
+    </section>
+  </main>
+
+  <dialog id="dlg-add">
+    <form method="dialog" class="dlg">
+      <h2>Adicionar conta</h2>
+      <p>Jeito fácil: com o userscript instalado, faça login no jogo e clique em <b>🔗 Enviar para o cockpit</b>.</p>
+      <p class="muted">Instale o userscript abrindo <a href="/piw.user.js" target="_blank">/piw.user.js</a> com o Tampermonkey (com o cockpit rodando).</p>
+      <p>Ou cole o <code>refreshToken</code> (DevTools do jogo → Application → Session Storage → <code>pokeweb:tokens</code>):</p>
+      <textarea id="add-token" rows="3" placeholder='{"accessToken":"…","refreshToken":"…"} ou só o refreshToken'></textarea>
+      <p id="add-error" class="error"></p>
+      <div class="dlg-actions">
+        <button value="cancel">Fechar</button>
+        <button id="add-submit" value="default">Adicionar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="dlg-sell">
+    <form method="dialog" class="dlg dlg-wide">
+      <h2 id="sell-title">Vender lixo</h2>
+      <div class="controls">
+        <button type="button" id="sell-all">Marcar todos</button>
+        <button type="button" id="sell-none">Desmarcar todos</button>
+        <span id="sell-total" class="muted"></span>
+      </div>
+      <div class="table-wrap short"><table id="sell-table"></table></div>
+      <p id="sell-error" class="error"></p>
+      <div class="dlg-actions">
+        <button value="cancel">Cancelar</button>
+        <button id="sell-confirm" class="danger" value="default">Vender</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="/shared/classifier.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>

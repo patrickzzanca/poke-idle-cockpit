@@ -1,0 +1,17 @@
+{
+  "discordWebhook": "https://discord.com/api/webhooks/SEU_WEBHOOK_AQUI",
+  "tags": {
+    "lixoIv": 130,
+    "topIv": 170,
+    "matrizIv": 165,
+    "uparIv": 145,
+    "uparQuality": 1.5,
+    "raroQuality": 1.7
+  },
+  "alerts": {
+    "boxRatio": 0.9,
+    "ballsMin": 100,
+    "potionsMin": 20,
+    "offlineMinutes": 2
+  }
+}

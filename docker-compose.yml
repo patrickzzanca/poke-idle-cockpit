@@ -1,0 +1,59 @@
+name: poke-cockpit
+services:
+  poke-cockpit:
+    container_name: poke-cockpit
+    image: node:22-alpine
+    working_dir: /app
+    command: node cockpit/server.js
+    environment:
+      TZ: America/Sao_Paulo
+      PIW_HOST: "0.0.0.0"
+      PIW_PORT: "8787"
+      DISCORD_WEBHOOK_URL: "${DISCORD_WEBHOOK_URL:-}"
+    ports:
+      - "8787:8787"
+    volumes:
+      - .:/app
+    restart: unless-stopped
+    labels:
+      icon: https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/items/poke-ball.png
+    x-casaos:
+      envs: []
+      ports:
+        - container: "8787"
+          description:
+            en_us: Web UI / Cockpit (HTTP)
+            pt_br: Web UI / Cockpit (HTTP)
+      volumes:
+        - container: /app
+          description:
+            en_us: Arquivos do Cockpit
+            pt_br: Arquivos do Cockpit
+networks:
+  default:
+    name: poke-cockpit_default
+x-casaos:
+  architectures:
+    - amd64
+    - arm64
+  author: Cockpit PIW
+  category: Games
+  description:
+    en_us: Painel de controle e automação leve 24/7 para Poke Idle World.
+    pt_br: Painel de controle e automação leve 24/7 para Poke Idle World.
+  developer: Poke Idle World
+  icon: https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/items/poke-ball.png
+  index: /
+  is_uncontrolled: false
+  main: poke-cockpit
+  port_map: "8787"
+  scheme: http
+  store_app_id: poke-cockpit
+  tagline:
+    en_us: Poke Idle Cockpit 24/7
+    pt_br: Poke Idle Cockpit 24/7
+  thumbnail: https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/items/poke-ball.png
+  title:
+    custom: ""
+    en_us: Poke Idle Cockpit
+    pt_br: Poke Idle Cockpit
