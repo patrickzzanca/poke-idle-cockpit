@@ -102,3 +102,56 @@ dialog::backdrop { background: #030a14c9; }
 dialog:has(.dlg-wide) { width: min(900px, 96vw); }
 .dlg p { margin: 0; }
 .dlg-actions { display: flex; justify-content: flex-end; gap: 8px; }
+
+.market-compare {
+  background: var(--panel-2);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 4px;
+}
+.market-compare .compare-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px;
+}
+.diff {
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.diff.pos {
+  background: #12351f;
+  color: var(--ok);
+  border: 1px solid color-mix(in srgb, var(--ok) 35%, transparent);
+}
+.diff.neg {
+  background: #1a2330;
+  color: var(--muted);
+}
+.tag.market-new {
+  color: #38bdf8;
+  border-color: rgba(56, 189, 248, 0.4);
+  background: rgba(56, 189, 248, 0.12);
+}
+.checkbox-label {
+  display: inline-flex !important;
+  flex-direction: row !important;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 12px !important;
+  color: var(--text) !important;
+  padding-bottom: 6px;
+}
+.checkbox-label input[type="checkbox"] {
+  cursor: pointer;
+}
+

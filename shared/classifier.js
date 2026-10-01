@@ -119,5 +119,5 @@
     return TAG_ORDER.find(t => tags.includes(t)) ?? null;
   }
 
-  return { DEFAULT_CONFIG, TAGS, TAG_ORDER, normalizePoke, classify, classifyCollection, makeMarketClassifier, primaryTag };
+  return { DEFAULT_CONFIG, TAGS, TAG_ORDER, normalizePoke, isBetter, bestByFamily, classify, classifyCollection, makeMarketClassifier, primaryTag };
 });

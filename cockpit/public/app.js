@@ -15,7 +15,8 @@ const STATUS = {
 const state = {
   accounts: new Map(), highlights: [], logs: [], warnings: [], config: null, tab: 'contas',
   collection: { accountId: '', items: [], sort: 'ivTotal', dir: -1, selected: new Set() },
-  sell: { accountId: '', items: [], selected: new Set() }
+  sell: { accountId: '', items: [], selected: new Set() },
+  market: { rawResults: [], accountId: '', lastMeta: null }
 };
 
 const $ = sel => document.querySelector(sel);
@@ -418,18 +419,93 @@ async function searchMarket() {
     const data = await api('/api/market/scan', { method: 'POST', body: {
       accountId, tag: $('#mk-tag').value, element: $('#mk-element').value, sort: $('#mk-sort').value
     } });
-    $('#mk-status').textContent = `${fmt(data.total)} anúncios lidos em ${data.pages} página(s), ${fmt(data.results.length)} com tag. ${data.complete ? 'Busca completa.' : 'Cobertura não confirmada.'} ${data.reason}`;
-    $('#mk-results').replaceChildren(...data.results.map(item => el('article', { class: 'listing' },
-      el('b', {}, `${item.shiny ? '✨ ' : ''}${item.name}`),
-      el('span', { class: 'muted' }, `IV ${item.ivTotal} · Q ${item.quality.toFixed(2)} · Nv ${fmt(item.level)} · ${item.offerOnly ? 'Só oferta' : `${item.currency === 'DIAMONDS' ? '💎' : '$'} ${fmt(item.price)}`}`),
-      el('div', {}, typeBadges(item.types), tagBadges(item.tags, item.reasons)),
-      item.listingId ? el('small', { class: 'muted' }, `Anúncio ${item.listingId}`) : null)));
+    state.market.rawResults = data.results || [];
+    state.market.accountId = accountId;
+    state.market.lastMeta = data;
+    renderMarket();
   } catch (error) {
     $('#mk-status').textContent = error.message;
   } finally {
     $('#mk-search').disabled = false;
     $('#mk-cancel').hidden = true;
   }
+}
+
+function renderMarket() {
+  const { rawResults, lastMeta } = state.market;
+  if (!rawResults || !rawResults.length) {
+    if (lastMeta) {
+      $('#mk-status').textContent = `${fmt(lastMeta.total)} anúncios lidos em ${lastMeta.pages} página(s), nenhum anúncio compatível.`;
+    }
+    $('#mk-results').replaceChildren();
+    return;
+  }
+
+  const query = $('#mk-text').value.trim().toLowerCase();
+  const minIv = Number($('#mk-min-iv').value) || 0;
+  const minQ = Number($('#mk-min-q').value) || 0;
+  const maxPrice = Number($('#mk-max-price').value) || Infinity;
+  const currency = $('#mk-currency').value;
+  const shinyOnly = $('#mk-shiny-only').checked;
+  const hideOffers = $('#mk-hide-offers').checked;
+  const tagFilter = $('#mk-tag').value;
+  const elementFilter = $('#mk-element').value;
+  const sortBy = $('#mk-sort').value;
+
+  const filtered = rawResults.filter(item => {
+    if (query && !item.name.toLowerCase().includes(query) && !item.comparison?.myBest?.name?.toLowerCase().includes(query)) return false;
+    if (minIv > 0 && item.ivTotal < minIv) return false;
+    if (minQ > 0 && item.quality < minQ) return false;
+    if (shinyOnly && !item.shiny) return false;
+    if (hideOffers && item.offerOnly) return false;
+    if (currency && item.currency !== currency) return false;
+    if (maxPrice < Infinity && !item.offerOnly && (item.price == null || item.price > maxPrice)) return false;
+    if (tagFilter !== 'all' && !item.tags.includes(tagFilter)) return false;
+    if (elementFilter && !item.types.includes(elementFilter)) return false;
+    return true;
+  });
+
+  const SORTERS = {
+    quality: (a, b) => b.quality - a.quality || b.ivTotal - a.ivTotal,
+    iv: (a, b) => b.ivTotal - a.ivTotal || b.quality - a.quality,
+    price: (a, b) => (a.offerOnly ? Infinity : a.price) - (b.offerOnly ? Infinity : b.price),
+    diff: (a, b) => ((b.comparison?.ivDiff ?? -999) - (a.comparison?.ivDiff ?? -999)) || (b.ivTotal - a.ivTotal)
+  };
+
+  const sorted = [...filtered].sort(SORTERS[sortBy] ?? SORTERS.iv);
+
+  if (lastMeta) {
+    $('#mk-status').textContent = `${fmt(lastMeta.total)} anúncios lidos em ${lastMeta.pages} página(s), exibindo ${fmt(sorted.length)} de ${fmt(rawResults.length)} encontrados. ${lastMeta.complete ? 'Busca completa.' : 'Cobertura não confirmada.'} ${lastMeta.reason || ''}`;
+  }
+
+  $('#mk-results').replaceChildren(...sorted.map(item => {
+    let compareNode = null;
+    if (item.comparison) {
+      const { myBest, ivDiff, qualityDiff, isUpgrade } = item.comparison;
+      const ivDiffStr = ivDiff > 0 ? `+${ivDiff} IV` : (ivDiff === 0 ? `0 IV` : `${ivDiff} IV`);
+      const qDiffStr = qualityDiff > 0 ? `+${qualityDiff.toFixed(2)} Q` : (qualityDiff === 0 ? `0 Q` : `${qualityDiff.toFixed(2)} Q`);
+      compareNode = el('div', { class: 'market-compare' },
+        el('div', { class: 'compare-row' },
+          el('span', { class: 'muted' }, `Seu: ${myBest.shiny ? '✨ ' : ''}${myBest.name} (IV ${myBest.ivTotal} · Q ${myBest.quality != null ? myBest.quality.toFixed(2) : '—'})`),
+          el('span', { class: `diff ${isUpgrade ? 'pos' : 'neg'}` }, `${ivDiffStr} · ${qDiffStr}`)
+        )
+      );
+    } else if (item.isNewSpecies) {
+      compareNode = el('div', { class: 'market-compare' },
+        el('div', { class: 'compare-row' },
+          el('span', { class: 'tag market-new' }, 'Novo na coleção!')
+        )
+      );
+    }
+
+    return el('article', { class: 'listing' },
+      el('b', {}, `${item.shiny ? '✨ ' : ''}${item.name}${item.level ? ` Nv ${fmt(item.level)}` : ''}`),
+      el('span', { class: 'muted' }, `IV ${item.ivTotal} · Q ${item.quality.toFixed(2)} · ${item.offerOnly ? 'Só oferta' : `${item.currency === 'DIAMONDS' ? '💎' : '$'} ${fmt(item.price)}`}`),
+      el('div', {}, typeBadges(item.types), tagBadges(item.tags, item.reasons)),
+      compareNode,
+      item.listingId ? el('small', { class: 'muted' }, `Anúncio ${item.listingId}`) : null
+    );
+  }));
 }
 
 // ---------- Geral ----------
@@ -546,6 +622,9 @@ function bindUi() {
   });
   $('#mk-search').addEventListener('click', searchMarket);
   $('#mk-cancel').addEventListener('click', () => act('/api/market/cancel'));
+  for (const id of ['#mk-tag', '#mk-element', '#mk-sort', '#mk-currency']) $(id).addEventListener('change', renderMarket);
+  for (const id of ['#mk-shiny-only', '#mk-hide-offers']) $(id).addEventListener('change', renderMarket);
+  for (const id of ['#mk-text', '#mk-min-iv', '#mk-min-q', '#mk-max-price']) $(id).addEventListener('input', renderMarket);
   setInterval(renderAccounts, 5000);
 }
 

@@ -60,7 +60,14 @@
         <label>Comparar com <select id="mk-account"></select></label>
         <label>Tag <select id="mk-tag"><option value="all">Qualquer tag</option></select></label>
         <label>Elemento <select id="mk-element"><option value="">Todos</option></select></label>
-        <label>Ordenar <select id="mk-sort"><option value="iv">Maior IV</option><option value="quality">Maior Q</option><option value="price">Menor preço</option></select></label>
+        <label>Ordenar <select id="mk-sort"><option value="diff">Maior upgrade (+IV)</option><option value="iv">Maior IV</option><option value="quality">Maior Q</option><option value="price">Menor preço</option></select></label>
+        <label>Busca <input id="mk-text" placeholder="Nome do Pokémon"></label>
+        <label>Min IV <input id="mk-min-iv" type="number" min="0" max="186" placeholder="0" style="width: 55px;"></label>
+        <label>Min Q <input id="mk-min-q" type="number" step="0.05" min="0" placeholder="0.00" style="width: 60px;"></label>
+        <label>Preço máx <input id="mk-max-price" type="number" min="0" placeholder="Máx" style="width: 80px;"></label>
+        <label>Moeda <select id="mk-currency"><option value="">Todas</option><option value="GOLD">Gold ($)</option><option value="DIAMONDS">Diamonds (💎)</option></select></label>
+        <label class="checkbox-label"><input type="checkbox" id="mk-shiny-only"> Apenas Shiny ✨</label>
+        <label class="checkbox-label"><input type="checkbox" id="mk-hide-offers"> Ocultar só oferta</label>
         <button id="mk-search">Buscar todas as páginas</button>
         <button id="mk-cancel" hidden>Cancelar</button>
       </div>

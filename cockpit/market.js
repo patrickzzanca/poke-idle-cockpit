@@ -1,7 +1,7 @@
 'use strict';
 
 // Varredura do Mercado Global (portada do editado.js), com as tags unificadas.
-const { makeMarketClassifier, normalizePoke } = require('../shared/classifier.js');
+const { makeMarketClassifier, normalizePoke, bestByFamily } = require('../shared/classifier.js');
 
 function num(value) {
   if (value == null || value === '') return null;
@@ -106,17 +106,53 @@ function normalizeListing(entry, species) {
 const SORTERS = {
   quality: (a, b) => b.quality - a.quality || b.ivTotal - a.ivTotal,
   iv: (a, b) => b.ivTotal - a.ivTotal || b.quality - a.quality,
-  price: (a, b) => (a.offerOnly ? Infinity : a.price) - (b.offerOnly ? Infinity : b.price)
+  price: (a, b) => (a.offerOnly ? Infinity : a.price) - (b.offerOnly ? Infinity : b.price),
+  diff: (a, b) => ((b.comparison?.ivDiff ?? -999) - (a.comparison?.ivDiff ?? -999)) || (b.ivTotal - a.ivTotal)
 };
 
 async function scanMarket({ fetchPage, species, collection, config, tag = 'all', element = '', sort = 'iv', signal, onProgress }) {
   const scan = await fetchAllListings(fetchPage, { signal, onProgress });
-  const classify = makeMarketClassifier(collection, { familyOf: species ? species.familyOf : undefined, config });
+  const familyOf = species ? species.familyOf : id => id;
+  const normalizedCollection = (collection ?? []).map(normalizePoke).filter(Boolean);
+  const bestMap = bestByFamily(normalizedCollection, familyOf);
+  const classify = makeMarketClassifier(collection, { familyOf, config });
+
   const results = scan.entries.map(e => normalizeListing(e, species)).filter(Boolean)
-    .map(item => ({ ...item, ...classify(normalizePoke({ ...item, id: null })) }))
+    .map(item => {
+      const cls = classify(normalizePoke({ ...item, id: null }));
+      const family = item.speciesId != null ? familyOf(item.speciesId) : null;
+      const myBest = family != null ? bestMap.get(family) : null;
+
+      let comparison = null;
+      if (myBest) {
+        const ivDiff = item.ivTotal - myBest.ivTotal;
+        const qualityDiff = Number((item.quality - (myBest.quality ?? 0)).toFixed(2));
+        comparison = {
+          myBest: {
+            name: myBest.name,
+            level: myBest.level,
+            ivTotal: myBest.ivTotal,
+            quality: myBest.quality,
+            shiny: myBest.shiny
+          },
+          ivDiff,
+          qualityDiff,
+          isUpgrade: ivDiff > 0 || (ivDiff === 0 && qualityDiff > 0)
+        };
+      }
+
+      return {
+        ...item,
+        ...cls,
+        family,
+        comparison,
+        isNewSpecies: item.speciesId != null && !myBest
+      };
+    })
     .filter(item => item.tags.length && (tag === 'all' || item.tags.includes(tag)))
     .filter(item => !element || item.types.includes(element))
     .sort(SORTERS[sort] ?? SORTERS.iv);
+
   return { results, total: scan.entries.length, pages: scan.pages, complete: scan.complete, reason: scan.reason };
 }
 
