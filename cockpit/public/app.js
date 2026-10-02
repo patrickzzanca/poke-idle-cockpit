@@ -71,7 +71,11 @@ function pokeStaticSpriteUrl(speciesId, shiny = false) {
 
 function applyTheme(theme) {
   const isLight = theme === 'light';
+  document.body.classList.toggle('light-mode', isLight);
+  document.body.classList.toggle('dark-mode', !isLight);
   document.body.classList.toggle('theme-light', isLight);
+  $('#theme-btn-dark')?.classList.toggle('active', !isLight);
+  $('#theme-btn-light')?.classList.toggle('active', isLight);
   const btn = $('#theme-toggle');
   if (btn) btn.textContent = isLight ? '🌙' : '☀️';
   try { localStorage.setItem('piw:theme', theme); } catch {}
@@ -93,14 +97,25 @@ function renderTotals() {
   const hunting = list.filter(a => a.status === 'online' && a.lastKillAt && Date.now() - a.lastKillAt < 120000).length;
   const sum = key => list.reduce((s, a) => s + (Number(a[key]) || 0), 0);
   const profitPerHour = list.reduce((s, a) => s + (a.analyzer?.profitPerHour || 0), 0);
-  const metric = (label, value) => el('div', { class: 'metric' }, el('div', { class: 'label' }, label), el('div', { class: 'value' }, value));
+  const totalKillsPerHour = list.reduce((s, a) => s + (a.analyzer?.killsPerHour || 0), 0);
+  const totalBox = list.reduce((s, a) => s + (a.box?.count || 0), 0);
+  const totalCapacity = list.reduce((s, a) => s + (a.box?.capacity || 0), 0);
+  const boxPct = totalCapacity > 0 ? Math.round((totalBox / totalCapacity) * 100) : 0;
+  const junkCount = list.reduce((s, a) => s + (a.junkCount || 0), 0);
+  const shiniesCount = state.highlights.filter(h => h.poke?.shiny).length;
+  const matrizCount = state.highlights.filter(h => h.poke?.tags?.includes('matriz')).length;
+
+  const card = (label, value, sub, valCls = '') => el('div', { class: 'metric-card' },
+    el('div', { class: 'metric-label' }, label),
+    el('div', { class: `metric-value ${valCls}` }, value),
+    el('div', { class: 'metric-sub' }, sub)
+  );
+
   $('#totals').replaceChildren(
-    metric('Caçando / online', `${hunting} / ${online} / ${list.length}`),
-    metric('Gold total', `$ ${fmt(sum('gold'))}`),
-    metric('Lucro/h somado', `${profitPerHour >= 0 ? '+' : '−'}$ ${fmt(Math.abs(profitPerHour))}`),
-    metric('Diamantes', fmt(sum('diamonds'))),
-    metric('Lixo na caixa', fmt(sum('junkCount'))),
-    metric('Destaques', fmt(state.highlights.length))
+    card('Rendimento somado', `${profitPerHour >= 0 ? '+' : '−'}$ ${fmt(Math.abs(profitPerHour))}/h`, `$ ${fmt(sum('gold'))} em caixa`, profitPerHour >= 0 ? 'pos' : 'neg'),
+    card('Velocidade de caça', `${fmt(totalKillsPerHour)} kills/h`, `${online} contas online sem interrupção`),
+    card('Ocupação de Box', `${totalBox} / ${totalCapacity || 100} (${boxPct}%)`, `${junkCount} Pokémons para vender`, boxPct >= 90 ? 'warn' : ''),
+    card('Destaques da Sessão', `✨ ${shiniesCount} Shinies`, `${matrizCount} Matrizes IV 160+ salvas`)
   );
 }
 
@@ -135,8 +150,8 @@ function duration(seconds) {
 
 function huntingStatus(a) {
   if (a.status !== 'online') return STATUS[a.status] ?? [a.status, 'warn'];
-  if (a.lastKillAt && Date.now() - a.lastKillAt < 120000) return [`⚔️ Caçando · kill há ${ago(a.lastKillAt)}`, 'ok'];
-  return [a.lastKillAt ? `Online · sem kill há ${ago(a.lastKillAt)}` : 'Online · sem kills ainda', 'warn'];
+  if (a.lastKillAt && Date.now() - a.lastKillAt < 120000) return [`Online`, 'ok'];
+  return [a.lastKillAt ? `Online · sem kill` : 'Online', 'warn'];
 }
 
 function analyzerBlock(z) {
@@ -154,7 +169,7 @@ function analyzerBlock(z) {
 
 function renderAccountCard(a) {
   const [statusText, statusKind] = huntingStatus(a);
-  const cooldown = a.cooldownUntil && a.cooldownUntil > Date.now() ? ` · cooldown ${Math.ceil((a.cooldownUntil - Date.now()) / 1000)}s` : '';
+  const cooldown = a.cooldownUntil && a.cooldownUntil > Date.now() ? ` · cd ${Math.ceil((a.cooldownUntil - Date.now()) / 1000)}s` : '';
   const leader = a.leader;
   const box = a.box;
   const boxRatio = box ? box.count / box.capacity : 0;
@@ -171,62 +186,61 @@ function renderAccountCard(a) {
   const ballsTime = estimateTime(activeBalls, ballsPerHour);
 
   const actions = [
-    el('button', { class: 'small', onclick: () => openCollection(a.id) }, '📋 Coleção'),
-    el('button', { class: 'small', onclick: () => openSell(a.id) }, `🗑 Lixo (${fmt(a.junkCount)})`),
-    el('button', { class: 'small', onclick: () => openSession(a.id) }, '🌐 Abrir sessão')
-  ];
-  if (['replaced', 'error', 'offline', 'handedOff'].includes(a.status)) {
-    actions.push(el('button', { class: 'small', onclick: () => act(`/api/accounts/${a.id}/reconnect`) }, '🔌 Reconectar'));
-  }
-  actions.push(el('button', { class: 'small', title: 'Remover do cockpit', onclick: () => removeAccount(a) }, '✕'));
+    a.junkCount > 0 ? el('button', { class: 'btn-crimson small', onclick: () => openSell(a.id) }, `💰 Limpar lixo ($ ${fmt(a.junkCount * 800)})`) : null,
+    el('button', { class: 'btn-hardware-subtle small', onclick: () => openCollection(a.id) }, '📋 Coleção'),
+    el('button', { class: 'btn-hardware-subtle small', onclick: () => openSession(a.id) }, '🌐 Sessão'),
+    ['replaced', 'error', 'offline', 'handedOff'].includes(a.status) ? el('button', { class: 'btn-hardware-subtle small', onclick: () => act(`/api/accounts/${a.id}/reconnect`) }, '🔌 Reconectar') : null,
+    el('button', { class: 'btn-hardware-subtle small', title: 'Remover do cockpit', onclick: () => removeAccount(a) }, '✕')
+  ].filter(Boolean);
 
-  return el('article', { class: 'card' },
-    el('div', { class: 'card-col' },
-      el('div', { class: 'row' },
-        el('span', { class: 'name' }, a.trainer?.name ?? a.name, el('span', { class: 'muted' }, a.trainer?.level != null ? ` · Nv ${a.trainer.level}` : '')),
-        el('span', { class: `pill ${statusKind}`, title: a.error ?? '' }, statusText + cooldown)),
-      el('div', { class: 'muted' }, a.hunt ? `📍 ${a.hunt}` : '📍 Fora de hunt: abra a sessão e entre numa hunt'),
-      leader ? (() => {
-        const spriteUrl = pokeSpriteUrl(leader.speciesId, leader.shiny);
-        const fallbackUrl = pokeStaticSpriteUrl(leader.speciesId, leader.shiny);
-        const spriteImg = spriteUrl ? el('img', {
-          src: spriteUrl,
-          alt: leader.name,
-          class: 'pixelated sprite-leader',
-          onerror: e => {
-            if (e.target.src !== fallbackUrl) e.target.src = fallbackUrl;
-            else e.target.style.display = 'none';
-          }
-        }) : el('div', { class: 'avatar' }, (leader.name ?? '?').slice(0, 2).toUpperCase());
+  const spriteUrl = leader ? pokeSpriteUrl(leader.speciesId, leader.shiny) : null;
+  const fallbackUrl = leader ? pokeStaticSpriteUrl(leader.speciesId, leader.shiny) : null;
+  const spriteImg = spriteUrl ? el('img', {
+    src: spriteUrl, alt: leader.name, class: 'pixelated sprite-leader-large',
+    onerror: e => { if (e.target.src !== fallbackUrl) e.target.src = fallbackUrl; else e.target.style.display = 'none'; }
+  }) : (leader ? el('div', { class: 'avatar' }, (leader.name ?? '?').slice(0, 2).toUpperCase()) : null);
 
-        return el('div', { class: 'leader' },
-          el('div', { class: 'lcd-pocket' },
-            spriteImg,
-            el('div', { class: 'drop-floor' })
-          ),
-          el('div', { style: 'flex:1;min-width:0' },
-            el('div', { class: 'row' },
-              el('span', { style: 'font-weight:600' }, `${leader.shiny ? '✨ ' : ''}${leader.name} Nv ${fmt(leader.level)}`),
-              el('span', { class: 'muted mono' }, `Q ${leader.quality != null ? Number(leader.quality).toFixed(2) : '—'} · IV ${fmt(leader.ivTotal)}`)),
-            leader.maxHp ? bar(leader.hp / leader.maxHp, leader.hp / leader.maxHp < 0.3 ? 'bad' : 'ok') : el('div', {}, typeBadges(leader.types)))
-        );
-      })() : el('div', { class: 'leader muted' }, 'Líder ainda não carregado')),
-    el('div', { class: 'card-col' },
-      analyzerBlock(a.analyzer),
-      el('div', {},
-        el('div', { class: 'row muted' },
-          el('span', {}, box ? `Caixa ${fmt(box.count)} / ${fmt(box.capacity)}${boxTime ? ` · cheia em ~${boxTime}` : ''}` : 'Caixa —'),
-          el('span', {}, a.junkRecent ? `+${a.junkRecent} lixo em 2 h` : '')),
-        bar(boxRatio, boxRatio >= 1 ? 'bad' : boxRatio >= limits.boxRatio ? 'warn' : 'ok')),
-      el('div', { class: 'card-actions' }, actions)),
-    el('div', { class: 'stats' },
-      el('span', {}, `💲 ${fmt(a.gold)}`),
-      el('span', {}, `💎 ${fmt(a.diamonds)}`),
-      s ? supplyLine(`🔴 ${s.ball?.name ?? 'Pokébolas'}`, activeBalls, limits.ballsMin, ballsTime ? ` (~${ballsTime})` : '') : el('span', { class: 'muted' }, '🔴 Pokébolas: —'),
-      s ? supplyLine(`🧪 ${s.potion?.name ?? 'Poções'}`, s.potion ? s.potion.quantity : s.potionsTotal, limits.potionsMin) : el('span', { class: 'muted' }, '🧪 Poções: —'),
-      s?.revives != null ? supplyLine('💊 Revives', s.revives, limits.potionsMin) : null,
-      s ? el('span', { class: 'muted wide' }, `Auto: ${[s.autoCatch && 'captura', s.autoPotion && 'poção', s.autoRevive && 'revive'].filter(Boolean).join(', ') || 'desligado'}`) : null,
-      a.sessionExpiresAt ? el('span', { class: 'muted wide' }, `🔑 Sessão até ${new Date(a.sessionExpiresAt).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}`) : null),
+  const profit = z?.profitPerHour || 0;
+
+  return el('article', { class: 'account-card' },
+    el('div', { class: 'account-card-header' },
+      el('div', { class: 'account-info' },
+        el('div', { class: 'account-title-row' },
+          el('h3', { class: 'name' }, a.trainer?.name ?? a.name, a.trainer?.level != null ? el('span', { class: 'muted' }, ` · Nv ${a.trainer.level}`) : ''),
+          el('span', { class: `pill-status ${statusKind}`, title: a.error ?? '' }, statusText + cooldown)
+        ),
+        el('p', { class: 'hunt-target' }, a.hunt ? 'Caçando: ' : 'Fora de hunt', a.hunt ? el('b', {}, a.hunt) : '', a.lastKillAt ? ` · kill há ${ago(a.lastKillAt)}` : ''),
+        el('div', { class: 'account-financials' },
+          el('span', { class: 'mono bold' }, `$ ${fmt(a.gold)}`),
+          el('span', { class: `mono font-semibold ${profit >= 0 ? 'pos' : 'neg'}` }, `${profit >= 0 ? '+' : '−'}$ ${fmt(Math.abs(profit))}/h`)
+        )
+      ),
+      leader ? el('div', { class: 'lcd-pocket-large' },
+        spriteImg,
+        el('div', { class: 'drop-floor' }),
+        el('span', { class: 'leader-caption mono' }, `${leader.shiny ? '✨ ' : ''}${leader.name} Nv ${fmt(leader.level)}`)
+      ) : el('div', { class: 'lcd-pocket-large muted' }, 'Sem líder')
+    ),
+    el('div', { class: 'gauges-panel' },
+      el('div', { class: 'gauge-item' },
+        el('div', { class: 'gauge-label' },
+          el('span', {}, `Box: ${fmt(box?.count ?? 0)} / ${fmt(box?.capacity ?? 0)}`),
+          el('span', { class: `mono ${boxRatio >= limits.boxRatio ? 'warn' : 'pos'}` }, boxTime ? `~${boxTime} restante` : '> 5h')
+        ),
+        bar(boxRatio, boxRatio >= 1 ? 'bad' : boxRatio >= limits.boxRatio ? 'warn' : 'ok')
+      ),
+      el('div', { class: 'gauge-item' },
+        el('div', { class: 'gauge-label' },
+          el('span', {}, `🔴 Pokébolas: ${fmt(activeBalls)}`),
+          el('span', { class: 'mono muted' }, ballsTime ? `~${ballsTime} de munição` : '')
+        ),
+        bar(activeBalls != null && activeBalls !== Infinity ? Math.min(1, activeBalls / 400) : 1, activeBalls < limits.ballsMin ? 'warn' : 'ok')
+      )
+    ),
+    el('div', { class: 'account-footer' },
+      el('span', { class: 'muted mono', style: 'font-size:11px' }, z ? `Ritmo: ${fmt(z.killsPerHour)} kills/h · ${fmt(capturesPerHour ? Math.round(capturesPerHour) : 0)} capturas/h` : 'Sessão iniciando…'),
+      el('div', { class: 'account-actions' }, actions)
+    ),
     a.alerts?.length ? el('div', { class: 'alerts' }, a.alerts.map(al => el('div', { class: `alert ${al.level}` }, al.text))) : null
   );
 }
@@ -234,8 +248,14 @@ function renderAccountCard(a) {
 function renderAccounts() {
   const list = [...state.accounts.values()];
   $('#accounts').replaceChildren(...(list.length ? list.map(renderAccountCard)
-    : [el('div', { class: 'empty' }, 'Nenhuma conta ainda. Clique em “+ Conta”.')]));
-  $('#warnings').replaceChildren(...state.warnings.map(w => el('div', { class: 'warning' }, w)));
+    : [el('div', { class: 'empty', style: 'grid-column: 1/-1' }, 'Nenhuma conta ainda. Clique em “+ Conta”.')]));
+  const warnNodes = state.warnings.map(w => el('div', { class: 'warning-banner' },
+    el('div', { class: 'warning-banner-left' },
+      el('span', { class: 'warning-dot' }),
+      el('span', {}, w)
+    )
+  ));
+  $('#warnings').replaceChildren(...warnNodes);
   renderTotals();
   refreshAccountSelects();
 }
@@ -394,10 +414,11 @@ function renderCollection() {
   const gridCards = rows.map(p => {
     const prot = p.team || p.starter || p.locked;
     const isChecked = selected.has(String(p.id));
+    const isLixo = p.tags.includes('lixo');
     const spriteUrl = pokeSpriteUrl(p.speciesId, p.shiny);
     const fallbackUrl = pokeStaticSpriteUrl(p.speciesId, p.shiny);
     const spriteImg = spriteUrl ? el('img', {
-      src: spriteUrl, alt: p.name, class: 'pixelated sprite-leader',
+      src: spriteUrl, alt: p.name, class: 'pixelated sprite-card',
       onerror: e => { if (e.target.src !== fallbackUrl) e.target.src = fallbackUrl; else e.target.style.display = 'none'; }
     }) : null;
 
@@ -413,17 +434,17 @@ function renderCollection() {
     });
 
     const topBadge = p.shiny
-      ? el('span', { class: 'pill warn' }, '✨ SHINY')
-      : (p.tags.length ? tagBadges(p.tags.slice(0, 1), p.reasons) : (p.team ? el('span', { class: 'pill info' }, 'TIME') : null));
+      ? el('span', { class: 'pill-status warn mono' }, '✨ SHINY')
+      : (p.tags.length ? tagBadges(p.tags.slice(0, 1), p.reasons) : (p.team ? el('span', { class: 'pill-status info mono' }, 'TIME') : null));
 
-    return el('div', { class: `poke-card ${prot ? 'protected' : ''}` },
+    return el('div', { class: `poke-card ${prot ? 'protected' : ''} ${isLixo ? 'is-lixo' : ''}` },
       el('div', { class: 'card-top' }, chk, topBadge),
-      el('div', { class: 'lcd-pocket' },
+      el('div', { class: 'lcd-pocket card-view' },
         spriteImg,
         el('div', { class: 'drop-floor' })
       ),
       el('div', { class: 'card-title' }, `${p.shiny ? '✨ ' : ''}${p.name} Nv ${fmt(p.level)}`),
-      el('div', { class: 'card-stats' }, `IV ${fmt(p.ivTotal)} · Q ${p.quality != null ? p.quality.toFixed(2) : '—'}`),
+      el('div', { class: 'card-stats mono' }, `IV ${fmt(p.ivTotal)} · Q ${p.quality != null ? p.quality.toFixed(2) : '—'}`),
       el('div', { class: 'card-foot' },
         typeBadges(p.profile?.types),
         p.sellValue != null ? el('span', { class: 'muted mono' }, `$ ${fmt(p.sellValue)}`) : null
@@ -512,14 +533,47 @@ function renderHighlights() {
   const account = $('#hl-account').value;
   const tag = $('#hl-tag').value;
   const list = state.highlights.filter(h => (!account || h.account === account) && (!tag || h.poke.tags.includes(tag)));
-  $('#highlights').replaceChildren(...(list.length ? list.slice(0, 300).map(h => el('li', {},
-    el('time', {}, time(h.at)),
-    el('b', {}, h.accountName),
-    el('span', { class: h.poke.shiny ? 'shiny' : '' }, `${h.poke.shiny ? '✨ ' : ''}${h.poke.name} Nv ${fmt(h.poke.level)}`),
-    el('span', { class: 'muted' }, `IV ${fmt(h.poke.ivTotal)} · Q ${h.poke.quality?.toFixed(2) ?? '—'}`),
-    typeBadges(h.poke.profile?.types),
-    tagBadges(h.poke.tags, h.poke.reasons)))
-    : [el('li', { class: 'muted' }, 'Nenhuma captura boa desde que o cockpit abriu. O lixo é só contado.')]));
+
+  const cards = list.length ? list.slice(0, 300).map(h => {
+    let spriteNode = null;
+    if (h.poke.speciesId) {
+      const spriteUrl = pokeSpriteUrl(h.poke.speciesId, h.poke.shiny);
+      const fallbackUrl = pokeStaticSpriteUrl(h.poke.speciesId, h.poke.shiny);
+      spriteNode = el('div', { class: 'lcd-pocket mini' },
+        el('img', {
+          src: spriteUrl,
+          alt: h.poke.name,
+          class: 'pixelated sprite-mini',
+          onerror: e => {
+            if (e.target.src !== fallbackUrl) e.target.src = fallbackUrl;
+            else e.target.style.display = 'none';
+          }
+        }),
+        el('div', { class: 'drop-floor mini' })
+      );
+    }
+    return el('article', { class: 'highlight-card' },
+      spriteNode,
+      el('div', { class: 'highlight-info' },
+        el('div', { class: 'highlight-meta' },
+          el('time', {}, time(h.at)),
+          el('span', { class: 'highlight-trainer' }, h.accountName)
+        ),
+        el('div', { class: `highlight-name ${h.poke.shiny ? 'shiny' : ''}` },
+          `${h.poke.shiny ? '✨ ' : ''}${h.poke.name}${h.poke.level ? ` Nv ${fmt(h.poke.level)}` : ''}`
+        ),
+        el('div', { class: 'highlight-stats' },
+          `IV ${fmt(h.poke.ivTotal)} · Q ${h.poke.quality?.toFixed(2) ?? '—'}`
+        ),
+        el('div', { style: 'margin-top:3px' },
+          typeBadges(h.poke.profile?.types),
+          tagBadges(h.poke.tags, h.poke.reasons)
+        )
+      )
+    );
+  }) : [el('div', { class: 'empty', style: 'grid-column: 1/-1' }, 'Nenhuma captura notável na sessão ainda. O lixo é filtrado automaticamente.')];
+
+  $('#highlights').replaceChildren(...cards);
   const junk = [...state.accounts.values()].map(a => `${a.trainer?.name ?? a.name}: +${a.junkRecent ?? 0}`).join(' · ');
   $('#hl-junk').textContent = junk ? `Lixo capturado nas últimas 2 h — ${junk}` : '';
 }
@@ -597,21 +651,47 @@ function renderMarket() {
   }
 
   $('#mk-results').replaceChildren(...sorted.map(item => {
-    let compareNode = null;
+    let splitNode = null;
     if (item.comparison) {
       const { myBest, ivDiff, qualityDiff, isUpgrade } = item.comparison;
       const ivDiffStr = ivDiff > 0 ? `+${ivDiff} IV` : (ivDiff === 0 ? `0 IV` : `${ivDiff} IV`);
       const qDiffStr = qualityDiff > 0 ? `+${qualityDiff.toFixed(2)} Q` : (qualityDiff === 0 ? `0 Q` : `${qualityDiff.toFixed(2)} Q`);
-      compareNode = el('div', { class: 'market-compare' },
-        el('div', { class: 'compare-row' },
-          el('span', { class: 'muted' }, `Seu: ${myBest.shiny ? '✨ ' : ''}${myBest.name} (IV ${myBest.ivTotal} · Q ${myBest.quality != null ? myBest.quality.toFixed(2) : '—'})`),
-          el('span', { class: `diff ${isUpgrade ? 'pos' : 'neg'}` }, `${ivDiffStr} · ${qDiffStr}`)
+      splitNode = el('div', { class: 'market-split-compare' },
+        el('div', { class: 'split-side left' },
+          el('span', { class: 'split-label' }, 'Anúncio'),
+          el('span', { class: 'split-val' }, `IV ${item.ivTotal}`),
+          el('span', { class: 'split-sub' }, `Q ${item.quality != null ? item.quality.toFixed(2) : '—'}`)
+        ),
+        el('div', { class: `split-center ${isUpgrade ? 'upgrade' : 'downgrade'}` },
+          el('span', { class: 'split-upgrade-title' }, isUpgrade ? 'Upgrade' : 'Downgrade'),
+          el('span', { class: 'split-upgrade-diff' }, ivDiffStr),
+          el('span', { class: 'split-upgrade-sub' }, qDiffStr)
+        ),
+        el('div', { class: 'split-side right' },
+          el('span', { class: 'split-label' }, `Seu (${myBest.name})`),
+          el('span', { class: 'split-val' }, `IV ${myBest.ivTotal}`),
+          el('span', { class: 'split-sub' }, `Q ${myBest.quality != null ? myBest.quality.toFixed(2) : '—'}`)
         )
       );
     } else if (item.isNewSpecies) {
-      compareNode = el('div', { class: 'market-compare' },
-        el('div', { class: 'compare-row' },
-          el('span', { class: 'tag market-new' }, 'Novo na coleção!')
+      splitNode = el('div', { class: 'market-split-compare new-species' },
+        el('div', { class: 'split-side left' },
+          el('span', { class: 'split-label' }, 'Anúncio'),
+          el('span', { class: 'split-val' }, `IV ${item.ivTotal} · Q ${item.quality != null ? item.quality.toFixed(2) : '—'}${item.level ? ` (Nv ${fmt(item.level)})` : ''}`)
+        ),
+        el('div', { class: 'split-center badge-blue' },
+          el('span', {}, '✨ Linha Inédita')
+        )
+      );
+    } else {
+      splitNode = el('div', { class: 'market-split-compare new-species' },
+        el('div', { class: 'split-side left' },
+          el('span', { class: 'split-label' }, 'Anúncio'),
+          el('span', { class: 'split-val' }, `IV ${item.ivTotal} · Q ${item.quality != null ? item.quality.toFixed(2) : '—'}`)
+        ),
+        el('div', { class: 'split-side right' },
+          el('span', { class: 'split-label' }, 'Tags'),
+          el('span', { class: 'split-sub' }, item.tags?.length ? item.tags.join(', ') : 'Sem tag')
         )
       );
     }
@@ -634,20 +714,31 @@ function renderMarket() {
       );
     }
 
-    return el('article', { class: 'listing' },
+    const priceText = item.offerOnly ? 'Só oferta' : `${item.currency === 'DIAMONDS' ? '💎' : '$'} ${fmt(item.price)}`;
+    let badgeText = '';
+    let badgeColor = '';
+    if (item.comparison?.isUpgrade) {
+      badgeText = 'Upgrade';
+      badgeColor = 'var(--accent-mint)';
+    } else if (item.isNewSpecies) {
+      badgeText = 'Novo na Bag';
+      badgeColor = 'var(--accent-blue)';
+    }
+
+    return el('article', { class: 'market-card' },
       el('div', { class: 'market-header' },
         spriteNode,
         el('div', { class: 'market-title' },
-          el('b', {}, `${item.shiny ? '✨ ' : ''}${item.name}${item.level ? ` Nv ${fmt(item.level)}` : ''}`),
-          el('div', {}, typeBadges(item.types), tagBadges(item.tags, item.reasons))
+          el('div', { class: 'market-name' }, `${item.shiny ? '✨ ' : ''}${item.name}${item.level ? ` Nv ${fmt(item.level)}` : ''}`),
+          item.listingId ? el('div', { class: 'market-sub-seller' }, `Anúncio #${item.listingId}${item.seller ? ` · ${item.seller}` : ''}`) : null,
+          el('div', { style: 'margin-top:3px' }, typeBadges(item.types), tagBadges(item.tags, item.reasons))
         ),
-        el('div', { class: 'market-price' },
-          item.offerOnly ? el('span', { class: 'muted' }, 'Só oferta') : el('b', { class: 'mono' }, `${item.currency === 'DIAMONDS' ? '💎' : '$'} ${fmt(item.price)}`)
+        el('div', { class: 'market-price-box' },
+          el('div', { class: 'market-price mono' }, priceText),
+          badgeText ? el('span', { class: 'market-badge mono', style: `color:${badgeColor}` }, badgeText) : null
         )
       ),
-      el('div', { class: 'muted mono' }, `IV ${item.ivTotal} · Q ${item.quality.toFixed(2)}`),
-      compareNode,
-      item.listingId ? el('small', { class: 'muted' }, `Anúncio ${item.listingId}`) : null
+      splitNode
     );
   }));
 }
@@ -656,7 +747,11 @@ function renderMarket() {
 
 function switchTab(tab) {
   state.tab = tab;
-  for (const button of document.querySelectorAll('.tabs button')) button.classList.toggle('on', button.dataset.tab === tab);
+  for (const button of document.querySelectorAll('.tabs button, .tabs-nav button, nav button[data-tab]')) {
+    const isThis = button.dataset.tab === tab;
+    button.classList.toggle('active', isThis);
+    button.classList.toggle('on', isThis);
+  }
   for (const section of document.querySelectorAll('.tab')) section.hidden = section.id !== `tab-${tab}`;
   if (tab === 'colecao' && $('#col-account').value !== state.collection.accountId) loadCollection();
   if (tab === 'destaques') renderHighlights();
@@ -707,7 +802,7 @@ async function loadState() {
 }
 
 function bindUi() {
-  for (const button of document.querySelectorAll('.tabs button')) button.addEventListener('click', () => switchTab(button.dataset.tab));
+  for (const button of document.querySelectorAll('.tabs button, .tabs-nav button, nav button[data-tab]')) button.addEventListener('click', () => switchTab(button.dataset.tab));
   $('#add-account').addEventListener('click', () => { $('#add-error').textContent = ''; $('#dlg-add').showModal(); });
   $('#add-submit').addEventListener('click', async event => {
     event.preventDefault();
@@ -793,7 +888,9 @@ function bindUi() {
       button.disabled = false;
     }
   });
-  $('#theme-toggle').addEventListener('click', () => applyTheme(document.body.classList.contains('theme-light') ? 'dark' : 'light'));
+  $('#theme-btn-dark')?.addEventListener('click', () => applyTheme('dark'));
+  $('#theme-btn-light')?.addEventListener('click', () => applyTheme('light'));
+  $('#theme-toggle')?.addEventListener('click', () => applyTheme(document.body.classList.contains('light-mode') ? 'dark' : 'light'));
   $('#mk-search').addEventListener('click', searchMarket);
   $('#mk-cancel').addEventListener('click', () => act('/api/market/cancel'));
   for (const id of ['#mk-tag', '#mk-element', '#mk-sort', '#mk-currency']) $(id).addEventListener('change', renderMarket);

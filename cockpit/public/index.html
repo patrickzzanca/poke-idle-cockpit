@@ -3,41 +3,55 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Cockpit PIW</title>
+  <title>Cockpit PIW — Hardware Edition</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/style.css">
 </head>
-<body>
+<body class="dark-mode">
   <header class="top">
     <div class="brand">
       <span class="brand-dot"></span>
-      <h1>Cockpit PIW</h1>
+      <div class="brand-titles">
+        <h1 class="brand-main">Cockpit PIW</h1>
+        <span class="brand-sub">/ Homelab Gandalf</span>
+      </div>
     </div>
-    <nav class="tabs">
-      <button data-tab="contas" class="on">Contas</button>
-      <button data-tab="colecao">Coleção</button>
-      <button data-tab="destaques">Destaques</button>
-      <button data-tab="mercado">Mercado</button>
+    <nav class="tabs-nav">
+      <button data-tab="contas" class="nav-pill active">Contas</button>
+      <button data-tab="colecao" class="nav-pill">Coleção</button>
+      <button data-tab="destaques" class="nav-pill">Destaques</button>
+      <button data-tab="mercado" class="nav-pill">Mercado</button>
     </nav>
     <div class="top-actions">
-      <span id="conn" class="dot bad" title="Conexão com o cockpit"></span>
-      <button id="theme-toggle" class="theme-toggle" title="Alternar tema escuro / claro">☀️</button>
-      <button id="add-account">+ Conta</button>
+      <div class="status-indicator">
+        <span id="conn" class="dot bad" title="Conexão com o cockpit"></span>
+        <span class="status-text mono">8787 · Ativo</span>
+      </div>
+      <div class="segmented-control theme-switch">
+        <button type="button" id="theme-btn-dark" class="active">Escuro</button>
+        <button type="button" id="theme-btn-light">Claro</button>
+      </div>
+      <button id="add-account" class="btn-hardware-subtle">+ Conta</button>
     </div>
   </header>
 
   <main>
+    <!-- TAB 1: CONTAS -->
     <section id="tab-contas" class="tab">
-      <div id="warnings"></div>
+      <div id="warnings" class="warnings-container"></div>
       <div id="totals" class="totals"></div>
       <div id="accounts" class="accounts"></div>
-      <div class="panel">
-        <h2>Eventos</h2>
+      <div class="panel hardware-card">
+        <h2>Eventos da Sessão</h2>
         <ul id="logs" class="logs"></ul>
       </div>
     </section>
 
+    <!-- TAB 2: COLEÇÃO -->
     <section id="tab-colecao" class="tab" hidden>
-      <div class="controls">
+      <div class="controls hardware-card">
         <label>Conta <select id="col-account"></select></label>
         <div class="quick-filters" id="col-quick-filters">
           <button type="button" class="pill-filter active" data-tag="">Todos</button>
@@ -53,13 +67,15 @@
           <button type="button" id="col-view-grid" class="view-btn on" title="Modo Grid / Pokédex">🎴 Pokédex</button>
           <button type="button" id="col-view-table" class="view-btn" title="Modo Tabela">📄 Tabela</button>
         </div>
-        <button id="col-select-all" type="button" class="small">Selecionar tudo</button>
-        <button id="col-select-none" type="button" class="small">Desmarcar</button>
-        <span id="col-count" class="muted"></span>
+        <div class="select-actions">
+          <button id="col-select-all" type="button" class="btn-hardware-subtle small">Selecionar tudo</button>
+          <button id="col-select-none" type="button" class="btn-hardware-subtle small">Desmarcar</button>
+        </div>
+        <span id="col-count" class="muted mono"></span>
       </div>
 
       <div id="col-grid-wrap" class="pokedex-grid"></div>
-      <div id="col-table-wrap" class="table-wrap" hidden><table id="col-table"></table></div>
+      <div id="col-table-wrap" class="table-wrap hardware-card" hidden><table id="col-table"></table></div>
 
       <div id="col-floating-dock" class="floating-dock hidden">
         <div class="dock-info">
@@ -67,24 +83,26 @@
           <span id="dock-text">0 selecionados</span>
         </div>
         <div class="dock-actions">
-          <button id="dock-lock" type="button" class="small">🔒 Travar</button>
-          <button id="dock-sell" type="button" class="danger small" style="font-weight:700">💰 Vender Selecionados</button>
-          <button id="dock-clear" type="button" class="small">✕</button>
+          <button id="dock-lock" type="button" class="btn-hardware-subtle small">🔒 Travar</button>
+          <button id="dock-sell" type="button" class="btn-crimson small" style="font-weight:700">💰 Vender Selecionados</button>
+          <button id="dock-clear" type="button" class="btn-hardware-subtle small">✕</button>
         </div>
       </div>
     </section>
 
+    <!-- TAB 3: DESTAQUES -->
     <section id="tab-destaques" class="tab" hidden>
-      <div class="controls">
+      <div class="controls hardware-card">
         <label>Conta <select id="hl-account"><option value="">Todas</option></select></label>
         <label>Tag <select id="hl-tag"><option value="">Todas</option></select></label>
         <span id="hl-junk" class="muted"></span>
       </div>
-      <ul id="highlights" class="highlights"></ul>
+      <div id="highlights" class="highlights-grid"></div>
     </section>
 
+    <!-- TAB 4: MERCADO -->
     <section id="tab-mercado" class="tab" hidden>
-      <div class="controls">
+      <div class="controls hardware-card">
         <label>Comparar com <select id="mk-account"></select></label>
         <label>Tag <select id="mk-tag"><option value="all">Qualquer tag</option></select></label>
         <label>Elemento <select id="mk-element"><option value="">Todos</option></select></label>
@@ -96,11 +114,11 @@
         <label>Moeda <select id="mk-currency"><option value="">Todas</option><option value="GOLD">Gold ($)</option><option value="DIAMONDS">Diamonds (💎)</option></select></label>
         <label class="checkbox-label"><input type="checkbox" id="mk-shiny-only"> Apenas Shiny ✨</label>
         <label class="checkbox-label"><input type="checkbox" id="mk-hide-offers"> Ocultar só oferta</label>
-        <button id="mk-search">Buscar todas as páginas</button>
-        <button id="mk-cancel" hidden>Cancelar</button>
+        <button id="mk-search" class="btn-hardware-action">Buscar no Mercado</button>
+        <button id="mk-cancel" class="btn-hardware-subtle" hidden>Cancelar</button>
       </div>
-      <p id="mk-status" class="muted">Nenhuma compra é feita aqui; só leitura dos anúncios.</p>
-      <div id="mk-results" class="market"></div>
+      <p id="mk-status" class="muted market-status-note">Nenhuma compra é feita aqui; apenas leitura e análise de upgrades.</p>
+      <div id="mk-results" class="market-grid"></div>
     </section>
   </main>
 
@@ -113,8 +131,8 @@
       <textarea id="add-token" rows="3" placeholder='{"accessToken":"…","refreshToken":"…"} ou só o refreshToken'></textarea>
       <p id="add-error" class="error"></p>
       <div class="dlg-actions">
-        <button value="cancel">Fechar</button>
-        <button id="add-submit" value="default">Adicionar</button>
+        <button value="cancel" class="btn-hardware-subtle">Fechar</button>
+        <button id="add-submit" class="btn-hardware-action" value="default">Adicionar</button>
       </div>
     </form>
   </dialog>
@@ -123,15 +141,15 @@
     <form method="dialog" class="dlg dlg-wide">
       <h2 id="sell-title">Vender lixo</h2>
       <div class="controls">
-        <button type="button" id="sell-all">Marcar todos</button>
-        <button type="button" id="sell-none">Desmarcar todos</button>
-        <span id="sell-total" class="muted"></span>
+        <button type="button" id="sell-all" class="btn-hardware-subtle">Marcar todos</button>
+        <button type="button" id="sell-none" class="btn-hardware-subtle">Desmarcar todos</button>
+        <span id="sell-total" class="muted mono"></span>
       </div>
       <div class="table-wrap short"><table id="sell-table"></table></div>
       <p id="sell-error" class="error"></p>
       <div class="dlg-actions">
-        <button value="cancel">Cancelar</button>
-        <button id="sell-confirm" class="danger" value="default">Vender</button>
+        <button value="cancel" class="btn-hardware-subtle">Cancelar</button>
+        <button id="sell-confirm" class="btn-crimson" value="default">Vender</button>
       </div>
     </form>
   </dialog>
