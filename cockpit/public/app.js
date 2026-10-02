@@ -218,7 +218,10 @@ function renderAccountCard(a) {
       leader ? el('div', { class: 'lcd-pocket-large' },
         spriteImg,
         el('div', { class: 'drop-floor' }),
-        el('span', { class: 'leader-caption mono' }, `${leader.shiny ? '✨ ' : ''}${leader.name} Nv ${fmt(leader.level)}`)
+        el('div', { class: 'leader-caption' },
+          el('span', { class: 'leader-name' }, `${leader.shiny ? '✨ ' : ''}${leader.name}`),
+          el('span', { class: 'leader-lvl mono' }, `Nv ${fmt(leader.level)}`)
+        )
       ) : el('div', { class: 'lcd-pocket-large muted' }, 'Sem líder')
     ),
     el('div', { class: 'gauges-panel' },

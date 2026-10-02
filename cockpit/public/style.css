@@ -545,7 +545,7 @@ main {
 
 .lcd-pocket-large {
   width: 96px;
-  height: 96px;
+  min-height: 104px;
   background-color: var(--lcd-screen);
   border: 1px solid var(--border-subtle);
   border-radius: 12px;
@@ -557,7 +557,7 @@ main {
   position: relative;
   overflow: hidden;
   box-shadow: inset 0 1px 4px rgba(0, 0, 0, 0.35);
-  padding: 4px;
+  padding: 6px 4px 5px;
 }
 
 .lcd-pocket-large::before {
@@ -570,20 +570,37 @@ main {
 }
 
 .sprite-leader-large {
-  max-width: 58px;
-  max-height: 58px;
+  max-width: 52px;
+  max-height: 52px;
   object-fit: contain;
 }
 
 .leader-caption {
-  font-size: 10px;
-  color: var(--text-muted);
   margin-top: 2px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  width: 100%;
+  max-width: 88px;
+  line-height: 1.25;
+}
+
+.leader-name {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--text-main);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 88px;
-  text-align: center;
+  display: block;
+}
+
+.leader-lvl {
+  font-size: 10px;
+  color: var(--text-faint);
+  display: block;
   font-weight: 500;
 }
 
