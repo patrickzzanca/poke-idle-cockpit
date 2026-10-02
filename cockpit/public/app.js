@@ -13,7 +13,7 @@ const STATUS = {
 };
 
 const state = {
-  accounts: new Map(), highlights: [], logs: [], warnings: [], config: null, tab: 'contas',
+  accounts: new Map(), highlights: [], shinies: [], logs: [], warnings: [], config: null, tab: 'contas',
   collection: { accountId: '', items: [], sort: 'ivTotal', dir: -1, selected: new Set(), viewMode: 'grid' },
   sell: { accountId: '', items: [], selected: new Set() },
   market: { rawResults: [], accountId: '', lastMeta: null }
@@ -88,6 +88,113 @@ function initTheme() {
   applyTheme(saved ?? (prefersLight ? 'light' : 'dark'));
 }
 
+// ---------- Alertas Sonoros (Web Audio API) ----------
+let audioCtx = null;
+let soundEnabled = true;
+
+try {
+  const savedSound = localStorage.getItem('piw:sound');
+  if (savedSound !== null) soundEnabled = savedSound === 'true';
+} catch {}
+
+function getAudioContext() {
+  if (!audioCtx) {
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (AudioContext) audioCtx = new AudioContext();
+  }
+  if (audioCtx && audioCtx.state === 'suspended') {
+    audioCtx.resume().catch(() => {});
+  }
+  return audioCtx;
+}
+
+function updateSoundToggleUi() {
+  const btn = $('#sound-toggle');
+  if (!btn) return;
+  btn.textContent = soundEnabled ? '🔊 Som: On' : '🔇 Som: Off';
+  btn.classList.toggle('muted', !soundEnabled);
+  btn.title = soundEnabled ? 'Avisos sonoros ativados (clique para mutar)' : 'Avisos sonoros desativados (clique para ativar)';
+}
+
+function toggleSound() {
+  soundEnabled = !soundEnabled;
+  try { localStorage.setItem('piw:sound', String(soundEnabled)); } catch {}
+  updateSoundToggleUi();
+  if (soundEnabled) {
+    getAudioContext();
+    playShinySpawnSound();
+  }
+}
+
+function setupAudioUnlock() {
+  const unlock = () => {
+    if (soundEnabled) getAudioContext();
+    window.removeEventListener('click', unlock);
+    window.removeEventListener('keydown', unlock);
+  };
+  window.addEventListener('click', unlock);
+  window.addEventListener('keydown', unlock);
+}
+
+// Som cintilante arpeggiado (E6, G#6, B6, E7, G#7 - estilo brilho mágico Shiny)
+function playShinySpawnSound() {
+  if (!soundEnabled) return;
+  const ctx = getAudioContext();
+  if (!ctx) return;
+
+  const now = ctx.currentTime;
+  const freqs = [1318.51, 1661.22, 1975.53, 2637.02, 3322.44];
+  freqs.forEach((freq, idx) => {
+    const start = now + idx * 0.055;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(freq, start);
+
+    gain.gain.setValueAtTime(0, start);
+    gain.gain.linearRampToValueAtTime(0.18, start + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.001, start + 0.28);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc.start(start);
+    osc.stop(start + 0.3);
+  });
+}
+
+// Som de vitória (Fanfarra rápida de derrota/captura de shiny)
+function playShinyKillSound() {
+  if (!soundEnabled) return;
+  const ctx = getAudioContext();
+  if (!ctx) return;
+
+  const now = ctx.currentTime;
+  const notes = [
+    { freq: 523.25, time: 0, dur: 0.1 },
+    { freq: 659.25, time: 0.09, dur: 0.1 },
+    { freq: 783.99, time: 0.18, dur: 0.12 },
+    { freq: 1046.50, time: 0.28, dur: 0.32 }
+  ];
+  notes.forEach(({ freq, time: offset, dur }) => {
+    const start = now + offset;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(freq, start);
+
+    gain.gain.setValueAtTime(0, start);
+    gain.gain.linearRampToValueAtTime(0.2, start + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.001, start + dur);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc.start(start);
+    osc.stop(start + dur + 0.02);
+  });
+}
+
 
 // ---------- Contas ----------
 
@@ -102,7 +209,7 @@ function renderTotals() {
   const totalCapacity = list.reduce((s, a) => s + (a.box?.capacity || 0), 0);
   const boxPct = totalCapacity > 0 ? Math.round((totalBox / totalCapacity) * 100) : 0;
   const junkCount = list.reduce((s, a) => s + (a.junkCount || 0), 0);
-  const shiniesCount = state.highlights.filter(h => h.poke?.shiny).length;
+  const shiniesCount = Math.max(state.shinies?.length || 0, state.highlights.filter(h => h.poke?.shiny).length);
   const matrizCount = state.highlights.filter(h => h.poke?.tags?.includes('matriz')).length;
 
   const card = (label, value, sub, valCls = '') => el('div', { class: 'metric-card' },
@@ -319,6 +426,84 @@ function renderAccounts() {
 function renderLogs() {
   $('#logs').replaceChildren(...state.logs.slice(0, 100).map(l =>
     el('li', {}, el('time', {}, time(l.at)), l.accountName ? `${l.accountName}: ` : '', l.text)));
+}
+
+function renderSessionShinies() {
+  const container = $('#session-shinies-list');
+  const badge = $('#shinies-counter-badge');
+  const summary = $('#shinies-stats-summary');
+  if (!container) return;
+
+  const shinies = state.shinies || [];
+  const spawns = shinies.filter(s => s.type === 'spawn').length;
+  const kills = shinies.filter(s => s.type === 'kill').length;
+  const captures = shinies.filter(s => s.type === 'capture').length;
+
+  if (badge) {
+    badge.textContent = `${shinies.length} encontrado${shinies.length === 1 ? '' : 's'}`;
+    badge.classList.toggle('has-shinies', shinies.length > 0);
+  }
+  if (summary) {
+    if (shinies.length > 0) {
+      summary.textContent = `👁️ ${spawns} spawns · ⚔️ ${kills} derrotados · 🔴 ${captures} capturados`;
+    } else {
+      summary.textContent = soundEnabled ? 'Radar sonoro ativo' : 'Radar sonoro mudo';
+    }
+  }
+
+  if (shinies.length === 0) {
+    container.replaceChildren(
+      el('div', { class: 'empty-shinies-state' },
+        el('div', { class: 'empty-shinies-icon' }, '✨'),
+        el('div', { class: 'empty-shinies-text' }, 'Nenhum shiny avistado nesta sessão ainda'),
+        el('div', { class: 'empty-shinies-sub' }, 'O radar do Cockpit está monitorando as hunts com alerta sonoro. Ao spawnar ou derrotar um shiny, você ouvirá o aviso sonoro e o registro aparecerá aqui.')
+      )
+    );
+    return;
+  }
+
+  const items = shinies.map(item => {
+    const spriteUrl = item.speciesId ? pokeSpriteUrl(item.speciesId, true) : null;
+    const fallbackUrl = item.speciesId ? pokeStaticSpriteUrl(item.speciesId, true) : null;
+    const spriteImg = spriteUrl ? el('img', {
+      src: spriteUrl, alt: item.speciesName, class: 'pixelated',
+      onerror: e => { if (e.target.src !== fallbackUrl) e.target.src = fallbackUrl; else e.target.style.display = 'none'; }
+    }) : el('span', { style: 'font-size:22px;' }, '✨');
+
+    const pillClass = item.type === 'kill' ? 'kill' : item.type === 'capture' ? 'capture' : 'spawn';
+    const pillText = item.type === 'kill' ? '⚔️ Derrotado' : item.type === 'capture' ? '🔴 Capturado' : '👁️ Spawnou';
+
+    let lootText = '';
+    if (item.loot && Array.isArray(item.loot) && item.loot.length > 0) {
+      lootText = ' · Loot: ' + item.loot.map(l => `${l.name} (${l.qty || 1})`).join(', ');
+    }
+
+    return el('div', { class: 'shiny-log-item' },
+      el('div', { class: 'shiny-log-sprite' },
+        spriteImg,
+        el('div', { class: 'drop-floor mini' })
+      ),
+      el('div', { class: 'shiny-log-content' },
+        el('div', { class: 'shiny-log-title' },
+          el('span', { class: 'shiny-log-name' }, `✨ ${item.speciesName}`),
+          el('span', { class: `shiny-event-pill ${pillClass}` }, pillText)
+        ),
+        el('div', { class: 'shiny-log-meta' },
+          el('span', {}, 'Conta: '),
+          el('b', {}, item.accountName),
+          el('span', {}, ' · Hunt: '),
+          el('span', { class: 'mono' }, item.hunt),
+          lootText ? el('span', { class: 'muted' }, lootText) : null
+        )
+      ),
+      el('div', { class: 'shiny-log-time mono' },
+        el('div', {}, time(item.at)),
+        el('div', { class: 'muted' }, `há ${ago(item.at)}`)
+      )
+    );
+  });
+
+  container.replaceChildren(...items);
 }
 
 function refreshAccountSelects() {
@@ -839,6 +1024,20 @@ function connectEvents() {
     if (state.tab === 'destaques') renderHighlights();
     renderTotals();
   });
+  source.addEventListener('shiny-encounter', e => {
+    const encounter = JSON.parse(e.data);
+    state.shinies.unshift(encounter);
+    if (state.shinies.length > 100) state.shinies.pop();
+
+    if (encounter.type === 'spawn') {
+      playShinySpawnSound();
+    } else if (encounter.type === 'kill' || encounter.type === 'capture') {
+      playShinyKillSound();
+    }
+
+    renderSessionShinies();
+    renderTotals();
+  });
   source.addEventListener('market-progress', e => {
     const { page, count } = JSON.parse(e.data);
     $('#mk-status').textContent = `Página ${page}: ${fmt(count)} anúncios recebidos…`;
@@ -849,11 +1048,13 @@ async function loadState() {
   const data = await api('/api/state');
   state.accounts = new Map(data.accounts.map(a => [a.id, a]));
   state.highlights = data.highlights;
+  state.shinies = data.shinies || [];
   state.logs = data.logs;
   state.warnings = data.warnings;
   state.config = data.config;
   renderAccounts();
   renderLogs();
+  renderSessionShinies();
   renderHighlights();
 }
 
@@ -944,6 +1145,11 @@ function bindUi() {
       button.disabled = false;
     }
   });
+  $('#sound-toggle')?.addEventListener('click', toggleSound);
+  $('#test-sound-btn')?.addEventListener('click', () => {
+    getAudioContext();
+    playShinySpawnSound();
+  });
   $('#theme-btn-dark')?.addEventListener('click', () => applyTheme('dark'));
   $('#theme-btn-light')?.addEventListener('click', () => applyTheme('light'));
   $('#theme-toggle')?.addEventListener('click', () => applyTheme(document.body.classList.contains('light-mode') ? 'dark' : 'light'));
@@ -956,6 +1162,8 @@ function bindUi() {
 }
 
 initTheme();
+updateSoundToggleUi();
+setupAudioUnlock();
 fillStaticSelects();
 bindUi();
 connectEvents();

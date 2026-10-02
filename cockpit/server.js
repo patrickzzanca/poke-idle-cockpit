@@ -81,6 +81,7 @@ function createApp({ store, api, species }) {
   const handoffCodes = new Map();
   const clients = new Set();
   const highlights = [];
+  const sessionShinies = [];
   const logs = [];
   const junk = new Map();
   const classifiedCache = new WeakMap();
@@ -96,6 +97,46 @@ function createApp({ store, api, species }) {
     logs.unshift(entry);
     logs.length = Math.min(logs.length, 200);
     broadcast('log', entry);
+  }
+
+  function pushShinyEncounter(account, encounter) {
+    const prof = encounter.speciesId != null ? species.profile(encounter.speciesId) : null;
+    const speciesName = encounter.speciesName ?? prof?.name ?? `Espécie #${encounter.speciesId ?? '?'}`;
+    const entry = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      at: encounter.at || Date.now(),
+      accountId: account.id,
+      accountName: account.name,
+      hunt: account.state.hunt || 'Hunt',
+      type: encounter.type, // 'spawn' | 'kill' | 'capture'
+      speciesId: encounter.speciesId,
+      speciesName,
+      loot: encounter.loot ?? null,
+      poke: encounter.poke ?? null
+    };
+    sessionShinies.unshift(entry);
+    sessionShinies.length = Math.min(sessionShinies.length, 100);
+
+    broadcast('shiny-encounter', entry);
+
+    const emoji = encounter.type === 'spawn' ? '✨👁️' : encounter.type === 'kill' ? '⚔️✨' : '🔴✨';
+    const actionText = encounter.type === 'spawn' ? 'spawnou na hunt' : encounter.type === 'kill' ? 'foi derrotado na hunt' : 'foi capturado!';
+    pushLog({
+      at: entry.at,
+      account: account.id,
+      accountName: account.name,
+      text: `${emoji} Shiny ${speciesName} ${actionText} (${entry.hunt})`
+    });
+
+    if (discord) {
+      discord.sendAlert(
+        account.name,
+        account.id,
+        'shiny',
+        `✨ **SHINY ${encounter.type.toUpperCase()}!** Pokémon: ${speciesName} (${entry.hunt})`,
+        'success'
+      );
+    }
   }
 
   function classified(account) {
@@ -138,9 +179,19 @@ function createApp({ store, api, species }) {
     account.on('pokes', () => broadcast('account', summary(account)));
     account.on('log', pushLog);
     account.on('hunt', slug => store.upsert({ id: record.id, lastHunt: slug }));
+    account.on('shiny-encounter', encounter => pushShinyEncounter(account, encounter));
     account.on('capture', ({ at, poke }) => {
       const item = classified(account).find(p => String(p.id) === String(poke.id));
       if (!item) return;
+      if (item.shiny) {
+        pushShinyEncounter(account, {
+          type: 'capture',
+          at,
+          speciesId: item.speciesId,
+          speciesName: item.name,
+          poke: item
+        });
+      }
       if (item.tags.includes('lixo')) {
         junk.set(account.id, [...(junk.get(account.id) ?? []), at]);
         return;
@@ -320,7 +371,7 @@ function createApp({ store, api, species }) {
 
     if (req.method === 'GET' && p === '/api/state') {
       return sendJson(res, 200, {
-        accounts: [...accounts.values()].map(summary), highlights, logs,
+        accounts: [...accounts.values()].map(summary), highlights, shinies: sessionShinies, logs,
         warnings: store.warnings, config: store.config
       });
     }

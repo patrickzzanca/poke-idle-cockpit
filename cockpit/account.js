@@ -44,6 +44,7 @@ class Account extends EventEmitter {
     this.retries = 0;
     this.authFailures = 0;
     this.timers = { reconnect: null, ping: null, status: null, hunt: null, analyzer: null, huntFallback: null };
+    this.activeShinies = new Set();
     this.lastMessageAt = 0;
     this.pingSentAt = 0;
     this.pokes = null;
@@ -262,6 +263,7 @@ class Account extends EventEmitter {
     clearInterval(this.timers.status);
     clearInterval(this.timers.analyzer);
     this.timers = { reconnect: null, ping: null, status: null, hunt: null, analyzer: null, huntFallback: null };
+    this.activeShinies.clear();
   }
 
   closeSocket() {
@@ -320,8 +322,42 @@ class Account extends EventEmitter {
         }, ms + 100);
         break;
       }
+      case 'field':
+        if (Array.isArray(message.mobs)) {
+          const currentSlots = new Set();
+          for (const mob of message.mobs) {
+            if (mob && mob.shiny && !mob.dead && !mob.respawning) {
+              const key = `${mob.slot}:${mob.speciesId}`;
+              currentSlots.add(key);
+              if (!this.activeShinies.has(key)) {
+                this.activeShinies.add(key);
+                this.emit('shiny-encounter', {
+                  type: 'spawn',
+                  at: Date.now(),
+                  speciesId: mob.speciesId,
+                  slot: mob.slot
+                });
+                this.log(`✨ SHINY SPAWNOU NA HUNT! (Espécie #${mob.speciesId})`);
+              }
+            }
+          }
+          for (const key of this.activeShinies) {
+            if (!currentSlots.has(key)) this.activeShinies.delete(key);
+          }
+        }
+        break;
       case 'field-kill':
         this.setState({ lastKillAt: Date.now(), leaderFainted: false });
+        if (message.shiny) {
+          this.emit('shiny-encounter', {
+            type: 'kill',
+            at: Date.now(),
+            speciesId: message.speciesId,
+            speciesName: message.speciesName,
+            loot: message.loot
+          });
+          this.log(`⚔️✨ SHINY DERROTADO: ${message.speciesName ?? message.speciesId}!`);
+        }
         break;
       case 'analyzer': {
         // Estatísticas da sessão calculadas pelo servidor (mesma janela "Analisador" do jogo).

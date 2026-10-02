@@ -29,6 +29,7 @@
         <span id="conn" class="dot bad" title="Conexão com o cockpit"></span>
         <span class="status-text mono">8787 · Ativo</span>
       </div>
+      <button type="button" id="sound-toggle" class="btn-hardware-subtle" title="Ligar/Desligar avisos sonoros de Shiny">🔊 Som</button>
       <div class="segmented-control theme-switch">
         <button type="button" id="theme-btn-dark" class="active">Escuro</button>
         <button type="button" id="theme-btn-light">Claro</button>
@@ -43,6 +44,22 @@
       <div id="warnings" class="warnings-container"></div>
       <div id="totals" class="totals"></div>
       <div id="accounts" class="accounts"></div>
+
+      <!-- RADAR & LOG DE SHINIES DA SESSÃO -->
+      <div class="panel hardware-card session-shinies-panel">
+        <div class="panel-header-row">
+          <div class="panel-title-with-badge">
+            <h2>✨ Radar & Log de Shinies da Sessão</h2>
+            <span id="shinies-counter-badge" class="counter-badge">0 encontrados</span>
+          </div>
+          <div class="panel-actions">
+            <span id="shinies-stats-summary" class="mono text-muted text-xs">Radar sonoro ativo</span>
+            <button id="test-sound-btn" type="button" class="btn-hardware-subtle small" title="Testar som de shiny">🔔 Testar Som</button>
+          </div>
+        </div>
+        <div id="session-shinies-list" class="session-shinies-container"></div>
+      </div>
+
       <div class="panel hardware-card">
         <h2>Eventos da Sessão</h2>
         <ul id="logs" class="logs"></ul>
