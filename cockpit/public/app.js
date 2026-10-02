@@ -59,6 +59,32 @@ function bar(ratio, kind = '') {
   return el('div', { class: `bar ${kind}` }, el('span', { style: `width:${pct}%` }));
 }
 
+function pokeSpriteUrl(speciesId, shiny = false) {
+  if (!speciesId) return null;
+  return `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/versions/generation-v/black-white/animated/${shiny ? 'shiny/' : ''}${speciesId}.gif`;
+}
+
+function pokeStaticSpriteUrl(speciesId, shiny = false) {
+  if (!speciesId) return null;
+  return `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/${shiny ? 'shiny/' : ''}${speciesId}.png`;
+}
+
+function applyTheme(theme) {
+  const isLight = theme === 'light';
+  document.body.classList.toggle('theme-light', isLight);
+  const btn = $('#theme-toggle');
+  if (btn) btn.textContent = isLight ? '🌙' : '☀️';
+  try { localStorage.setItem('piw:theme', theme); } catch {}
+}
+
+function initTheme() {
+  let saved = null;
+  try { saved = localStorage.getItem('piw:theme'); } catch {}
+  const prefersLight = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches;
+  applyTheme(saved ?? (prefersLight ? 'light' : 'dark'));
+}
+
+
 // ---------- Contas ----------
 
 function renderTotals() {
@@ -160,14 +186,31 @@ function renderAccountCard(a) {
         el('span', { class: 'name' }, a.trainer?.name ?? a.name, el('span', { class: 'muted' }, a.trainer?.level != null ? ` · Nv ${a.trainer.level}` : '')),
         el('span', { class: `pill ${statusKind}`, title: a.error ?? '' }, statusText + cooldown)),
       el('div', { class: 'muted' }, a.hunt ? `📍 ${a.hunt}` : '📍 Fora de hunt: abra a sessão e entre numa hunt'),
-      leader ? el('div', { class: 'leader' },
-        el('div', { class: 'avatar' }, (leader.name ?? '?').slice(0, 2).toUpperCase()),
-        el('div', { style: 'flex:1;min-width:0' },
-          el('div', { class: 'row' },
-            el('span', {}, `${leader.shiny ? '✨ ' : ''}${leader.name} Nv ${fmt(leader.level)}`),
-            el('span', { class: 'muted' }, `Q ${leader.quality != null ? Number(leader.quality).toFixed(2) : '—'} · IV ${fmt(leader.ivTotal)}`)),
-          leader.maxHp ? bar(leader.hp / leader.maxHp, leader.hp / leader.maxHp < 0.3 ? 'bad' : 'ok') : el('div', {}, typeBadges(leader.types))))
-        : el('div', { class: 'leader muted' }, 'Líder ainda não carregado')),
+      leader ? (() => {
+        const spriteUrl = pokeSpriteUrl(leader.speciesId, leader.shiny);
+        const fallbackUrl = pokeStaticSpriteUrl(leader.speciesId, leader.shiny);
+        const spriteImg = spriteUrl ? el('img', {
+          src: spriteUrl,
+          alt: leader.name,
+          class: 'pixelated sprite-leader',
+          onerror: e => {
+            if (e.target.src !== fallbackUrl) e.target.src = fallbackUrl;
+            else e.target.style.display = 'none';
+          }
+        }) : el('div', { class: 'avatar' }, (leader.name ?? '?').slice(0, 2).toUpperCase());
+
+        return el('div', { class: 'leader' },
+          el('div', { class: 'lcd-pocket' },
+            spriteImg,
+            el('div', { class: 'drop-floor' })
+          ),
+          el('div', { style: 'flex:1;min-width:0' },
+            el('div', { class: 'row' },
+              el('span', { style: 'font-weight:600' }, `${leader.shiny ? '✨ ' : ''}${leader.name} Nv ${fmt(leader.level)}`),
+              el('span', { class: 'muted mono' }, `Q ${leader.quality != null ? Number(leader.quality).toFixed(2) : '—'} · IV ${fmt(leader.ivTotal)}`)),
+            leader.maxHp ? bar(leader.hp / leader.maxHp, leader.hp / leader.maxHp < 0.3 ? 'bad' : 'ok') : el('div', {}, typeBadges(leader.types)))
+        );
+      })() : el('div', { class: 'leader muted' }, 'Líder ainda não carregado')),
     el('div', { class: 'card-col' },
       analyzerBlock(a.analyzer),
       el('div', {},
@@ -498,10 +541,36 @@ function renderMarket() {
       );
     }
 
+    let spriteNode = null;
+    if (item.speciesId) {
+      const spriteUrl = pokeSpriteUrl(item.speciesId, item.shiny);
+      const fallbackUrl = pokeStaticSpriteUrl(item.speciesId, item.shiny);
+      spriteNode = el('div', { class: 'lcd-pocket mini' },
+        el('img', {
+          src: spriteUrl,
+          alt: item.name,
+          class: 'pixelated sprite-mini',
+          onerror: e => {
+            if (e.target.src !== fallbackUrl) e.target.src = fallbackUrl;
+            else e.target.style.display = 'none';
+          }
+        }),
+        el('div', { class: 'drop-floor mini' })
+      );
+    }
+
     return el('article', { class: 'listing' },
-      el('b', {}, `${item.shiny ? '✨ ' : ''}${item.name}${item.level ? ` Nv ${fmt(item.level)}` : ''}`),
-      el('span', { class: 'muted' }, `IV ${item.ivTotal} · Q ${item.quality.toFixed(2)} · ${item.offerOnly ? 'Só oferta' : `${item.currency === 'DIAMONDS' ? '💎' : '$'} ${fmt(item.price)}`}`),
-      el('div', {}, typeBadges(item.types), tagBadges(item.tags, item.reasons)),
+      el('div', { class: 'market-header' },
+        spriteNode,
+        el('div', { class: 'market-title' },
+          el('b', {}, `${item.shiny ? '✨ ' : ''}${item.name}${item.level ? ` Nv ${fmt(item.level)}` : ''}`),
+          el('div', {}, typeBadges(item.types), tagBadges(item.tags, item.reasons))
+        ),
+        el('div', { class: 'market-price' },
+          item.offerOnly ? el('span', { class: 'muted' }, 'Só oferta') : el('b', { class: 'mono' }, `${item.currency === 'DIAMONDS' ? '💎' : '$'} ${fmt(item.price)}`)
+        )
+      ),
+      el('div', { class: 'muted mono' }, `IV ${item.ivTotal} · Q ${item.quality.toFixed(2)}`),
       compareNode,
       item.listingId ? el('small', { class: 'muted' }, `Anúncio ${item.listingId}`) : null
     );
@@ -620,6 +689,7 @@ function bindUi() {
       button.disabled = false;
     }
   });
+  $('#theme-toggle').addEventListener('click', () => applyTheme(document.body.classList.contains('theme-light') ? 'dark' : 'light'));
   $('#mk-search').addEventListener('click', searchMarket);
   $('#mk-cancel').addEventListener('click', () => act('/api/market/cancel'));
   for (const id of ['#mk-tag', '#mk-element', '#mk-sort', '#mk-currency']) $(id).addEventListener('change', renderMarket);
@@ -628,6 +698,8 @@ function bindUi() {
   setInterval(renderAccounts, 5000);
 }
 
+initTheme();
 fillStaticSelects();
 bindUi();
 connectEvents();
+
