@@ -143,9 +143,13 @@ function ago(at) {
 }
 
 function duration(seconds) {
+  if (!seconds || seconds <= 0) return '0s';
   const h = Math.floor(seconds / 3600);
-  const m = Math.floor(seconds % 3600 / 60);
-  return h ? `${h}h ${m}m` : `${m}m`;
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = seconds % 60;
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
 }
 
 function huntingStatus(a) {
@@ -154,17 +158,39 @@ function huntingStatus(a) {
   return [a.lastKillAt ? `Online · sem kill` : 'Online', 'warn'];
 }
 
-function analyzerBlock(z) {
-  if (!z) return el('div', { class: 'muted' }, '📊 Estatísticas ainda não chegaram');
-  const profitClass = z.profitPerHour >= 0 ? 'pos' : 'neg';
-  return el('div', { class: 'analyzer' },
-    el('div', { class: 'row muted' }, el('span', {}, `📊 Sessão de ${duration(z.seconds)}`),
-      el('span', {}, `${fmt(z.kills)} kills · ${fmt(z.captures)} capturas${z.shinyCaptures ? ` (✨${z.shinyCaptures})` : ''}`)),
-    el('div', { class: 'rates' },
-      el('span', { class: profitClass, title: `Loot $ ${fmt(z.lootGold)} · gasto $ ${fmt(z.supplyGold)} · saldo $ ${fmt(z.profit)}` },
-        `${z.profitPerHour >= 0 ? '📈 +' : '📉 −'}$ ${fmt(Math.abs(z.profitPerHour))}/h`),
-      el('span', {}, `✨ ${fmt(z.xpPerHour)} XP/h`),
-      el('span', {}, `⚔️ ${fmt(z.killsPerHour)}/h`)));
+function sessionVisor(z, a) {
+  const capturesPerHour = z?.seconds > 60 && z.captures > 0 ? (z.captures / z.seconds) * 3600 : 0;
+  const isOnline = a.status === 'online';
+  return el('div', { class: 'session-visor' },
+    el('div', { class: 'session-visor-top' },
+      el('div', { class: 'session-visor-title' },
+        el('span', { class: `session-visor-dot ${isOnline ? 'active' : 'idle'}` }),
+        el('span', { class: 'mono' }, 'VISOR DE SESSÃO'),
+        a.hunt ? el('span', { class: 'session-visor-hunt' }, `· ${a.hunt}`) : null
+      ),
+      el('span', { class: 'session-visor-xp mono' }, z?.xpPerHour ? `✨ ${fmt(z.xpPerHour)} XP/h` : '')
+    ),
+    el('div', { class: 'session-visor-grid' },
+      el('div', { class: 'session-cell' },
+        el('span', { class: 'session-cell-label' }, '⏱️ Duração'),
+        el('span', { class: 'session-cell-val mono' }, duration(z?.seconds || 0)),
+        el('span', { class: 'session-cell-sub mono' }, isOnline ? (z?.seconds > 0 ? 'sessão ativa' : 'iniciando…') : 'pausada')
+      ),
+      el('div', { class: 'session-cell' },
+        el('span', { class: 'session-cell-label' }, '⚔️ Kills'),
+        el('span', { class: 'session-cell-val mono' }, fmt(z?.kills || 0)),
+        el('span', { class: 'session-cell-sub mono' }, `${fmt(z?.killsPerHour || 0)}/h`)
+      ),
+      el('div', { class: 'session-cell' },
+        el('span', { class: 'session-cell-label' }, '🔴 Capturas'),
+        el('span', { class: 'session-cell-val mono' },
+          fmt(z?.captures || 0),
+          z?.shinyCaptures ? el('span', { class: 'shiny-badge' }, `✨${z.shinyCaptures}`) : null
+        ),
+        el('span', { class: 'session-cell-sub mono' }, `${fmt(Math.round(capturesPerHour))}/h`)
+      )
+    )
+  );
 }
 
 async function changeHunt(accountId, currentHunt) {
@@ -250,6 +276,7 @@ function renderAccountCard(a) {
         )
       ) : el('div', { class: 'lcd-pocket-large muted' }, 'Sem líder')
     ),
+    sessionVisor(z, a),
     el('div', { class: 'gauges-panel' },
       el('div', { class: 'gauge-item' },
         el('div', { class: 'gauge-label' },
@@ -267,7 +294,7 @@ function renderAccountCard(a) {
       )
     ),
     el('div', { class: 'account-footer' },
-      el('span', { class: 'muted mono', style: 'font-size:11px' }, z ? `Ritmo: ${fmt(z.killsPerHour)} kills/h · ${fmt(capturesPerHour ? Math.round(capturesPerHour) : 0)} capturas/h` : 'Sessão iniciando…'),
+      el('span', { class: 'muted mono', style: 'font-size:11px' }, a.lastKillAt ? `Último kill há ${ago(a.lastKillAt)}` : (a.status === 'online' ? 'Sessão ativa · aguardando kill' : 'Conta pausada')),
       el('div', { class: 'account-actions' }, actions)
     ),
     a.alerts?.length ? el('div', { class: 'alerts' }, a.alerts.map(al => el('div', { class: `alert ${al.level}` }, al.text))) : null

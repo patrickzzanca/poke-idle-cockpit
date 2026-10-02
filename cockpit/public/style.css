@@ -662,6 +662,129 @@ body.light-mode .drop-floor {
 }
 
 /* ==========================================================================
+   Session Visor (LCD Display)
+   ========================================================================== */
+
+.session-visor {
+  background-color: var(--lcd-screen);
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  position: relative;
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.25);
+}
+
+.session-visor-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  padding-bottom: 6px;
+}
+
+body.light-mode .session-visor-top {
+  border-bottom-color: rgba(0, 0, 0, 0.06);
+}
+
+.session-visor-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+
+.session-visor-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-faint);
+}
+
+.session-visor-dot.active {
+  background: var(--accent-mint);
+  box-shadow: 0 0 6px var(--accent-mint);
+  animation: pulse-dot 2s infinite ease-in-out;
+}
+
+.session-visor-dot.idle {
+  background: var(--accent-amber);
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.85); }
+}
+
+.session-visor-hunt {
+  color: var(--text-faint);
+  font-size: 10px;
+  text-transform: none;
+  font-weight: 500;
+}
+
+.session-visor-xp {
+  font-size: 10px;
+  color: var(--accent-mint);
+  font-weight: 600;
+}
+
+.session-visor-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.session-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.session-cell-label {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-faint);
+}
+
+.session-cell-val {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-main);
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.session-cell-sub {
+  font-size: 10px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.shiny-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 9px;
+  background: rgba(245, 158, 11, 0.15);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  border-radius: 4px;
+  padding: 1px 4px;
+  margin-left: 2px;
+  font-weight: 700;
+}
+
+/* ==========================================================================
    Gauges Panel
    ========================================================================== */
 
