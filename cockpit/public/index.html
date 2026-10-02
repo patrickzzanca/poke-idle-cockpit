@@ -39,15 +39,39 @@
     <section id="tab-colecao" class="tab" hidden>
       <div class="controls">
         <label>Conta <select id="col-account"></select></label>
-        <label>Tag <select id="col-tag"><option value="">Todas</option></select></label>
+        <div class="quick-filters" id="col-quick-filters">
+          <button type="button" class="pill-filter active" data-tag="">Todos</button>
+          <button type="button" class="pill-filter" data-tag="lixo">🗑️ Só Lixo</button>
+          <button type="button" class="pill-filter" data-tag="matriz">💎 Matrizes</button>
+          <button type="button" class="pill-filter" data-tag="upar">⚔️ Upar</button>
+          <button type="button" class="pill-filter" data-tag="raro">✨ Raros/Shiny</button>
+        </div>
+        <select id="col-tag" hidden><option value="">Todas</option></select>
         <label>Tipo <select id="col-type"><option value="">Todos</option></select></label>
-        <label>Busca <input id="col-text" placeholder="Charizard"></label>
+        <label>Busca <input id="col-text" placeholder="Nome do Pokémon"></label>
+        <div class="view-switch">
+          <button type="button" id="col-view-grid" class="view-btn on" title="Modo Grid / Pokédex">🎴 Pokédex</button>
+          <button type="button" id="col-view-table" class="view-btn" title="Modo Tabela">📄 Tabela</button>
+        </div>
         <button id="col-select-all" type="button" class="small">Selecionar tudo</button>
         <button id="col-select-none" type="button" class="small">Desmarcar</button>
         <span id="col-count" class="muted"></span>
-        <button id="col-sell" class="danger">Vender selecionados</button>
       </div>
-      <div class="table-wrap"><table id="col-table"></table></div>
+
+      <div id="col-grid-wrap" class="pokedex-grid"></div>
+      <div id="col-table-wrap" class="table-wrap" hidden><table id="col-table"></table></div>
+
+      <div id="col-floating-dock" class="floating-dock hidden">
+        <div class="dock-info">
+          <span class="dock-dot"></span>
+          <span id="dock-text">0 selecionados</span>
+        </div>
+        <div class="dock-actions">
+          <button id="dock-lock" type="button" class="small">🔒 Travar</button>
+          <button id="dock-sell" type="button" class="danger small" style="font-weight:700">💰 Vender Selecionados</button>
+          <button id="dock-clear" type="button" class="small">✕</button>
+        </div>
+      </div>
     </section>
 
     <section id="tab-destaques" class="tab" hidden>

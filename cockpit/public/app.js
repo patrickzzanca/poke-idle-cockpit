@@ -14,7 +14,7 @@ const STATUS = {
 
 const state = {
   accounts: new Map(), highlights: [], logs: [], warnings: [], config: null, tab: 'contas',
-  collection: { accountId: '', items: [], sort: 'ivTotal', dir: -1, selected: new Set() },
+  collection: { accountId: '', items: [], sort: 'ivTotal', dir: -1, selected: new Set(), viewMode: 'grid' },
   sell: { accountId: '', items: [], selected: new Set() },
   market: { rawResults: [], accountId: '', lastMeta: null }
 };
@@ -354,12 +354,22 @@ function renderCollection() {
   }));
   const body = rows.map(p => {
     const prot = p.team || p.starter || p.locked;
+    const spriteUrl = pokeSpriteUrl(p.speciesId, p.shiny);
+    const fallbackUrl = pokeStaticSpriteUrl(p.speciesId, p.shiny);
+    const spriteImg = spriteUrl ? el('img', {
+      src: spriteUrl, alt: p.name, class: 'pixelated sprite-row',
+      onerror: e => { if (e.target.src !== fallbackUrl) e.target.src = fallbackUrl; else e.target.style.display = 'none'; }
+    }) : null;
+
     return el('tr', { class: prot ? 'protected' : '' },
       el('td', {}, el('input', {
         type: 'checkbox', disabled: prot || p.tags.includes('raro') || p.shiny, checked: selected.has(String(p.id)),
-        onchange: e => { e.target.checked ? selected.add(String(p.id)) : selected.delete(String(p.id)); updateCollectionCount(rows); }
+        onchange: e => { e.target.checked ? selected.add(String(p.id)) : selected.delete(String(p.id)); updateCollectionCount(rows); renderCollection(); }
       })),
-      el('td', {}, `${p.shiny ? '✨ ' : ''}${p.name}`, p.team ? el('span', { class: 'muted' }, ' (time)') : null),
+      el('td', { class: 'poke-cell' },
+        spriteImg,
+        el('span', {}, `${p.shiny ? '✨ ' : ''}${p.name}`, p.team ? el('span', { class: 'muted' }, ' (time)') : null)
+      ),
       el('td', {}, tagBadges(p.tags, p.reasons)),
       el('td', { class: 'num' }, fmt(p.level)),
       el('td', { class: 'num' }, fmt(p.ivTotal)),
@@ -379,13 +389,78 @@ function renderCollection() {
     );
   });
   $('#col-table').replaceChildren(el('thead', {}, head), el('tbody', {}, body));
+
+  // Pokedex Grid Mode
+  const gridCards = rows.map(p => {
+    const prot = p.team || p.starter || p.locked;
+    const isChecked = selected.has(String(p.id));
+    const spriteUrl = pokeSpriteUrl(p.speciesId, p.shiny);
+    const fallbackUrl = pokeStaticSpriteUrl(p.speciesId, p.shiny);
+    const spriteImg = spriteUrl ? el('img', {
+      src: spriteUrl, alt: p.name, class: 'pixelated sprite-leader',
+      onerror: e => { if (e.target.src !== fallbackUrl) e.target.src = fallbackUrl; else e.target.style.display = 'none'; }
+    }) : null;
+
+    const chk = el('input', {
+      type: 'checkbox',
+      disabled: prot || p.tags.includes('raro') || p.shiny,
+      checked: isChecked,
+      onchange: e => {
+        e.target.checked ? selected.add(String(p.id)) : selected.delete(String(p.id));
+        updateCollectionCount(rows);
+        renderCollection();
+      }
+    });
+
+    const topBadge = p.shiny
+      ? el('span', { class: 'pill warn' }, '✨ SHINY')
+      : (p.tags.length ? tagBadges(p.tags.slice(0, 1), p.reasons) : (p.team ? el('span', { class: 'pill info' }, 'TIME') : null));
+
+    return el('div', { class: `poke-card ${prot ? 'protected' : ''}` },
+      el('div', { class: 'card-top' }, chk, topBadge),
+      el('div', { class: 'lcd-pocket' },
+        spriteImg,
+        el('div', { class: 'drop-floor' })
+      ),
+      el('div', { class: 'card-title' }, `${p.shiny ? '✨ ' : ''}${p.name} Nv ${fmt(p.level)}`),
+      el('div', { class: 'card-stats' }, `IV ${fmt(p.ivTotal)} · Q ${p.quality != null ? p.quality.toFixed(2) : '—'}`),
+      el('div', { class: 'card-foot' },
+        typeBadges(p.profile?.types),
+        p.sellValue != null ? el('span', { class: 'muted mono' }, `$ ${fmt(p.sellValue)}`) : null
+      )
+    );
+  });
+
+  const emptyMsg = [el('div', { class: 'empty', style: 'grid-column: 1/-1' }, 'Nenhum Pokémon encontrado com estes filtros.')];
+  $('#col-grid-wrap').replaceChildren(...(rows.length ? gridCards : emptyMsg));
+
+  setCollectionView(state.collection.viewMode || 'grid');
   updateCollectionCount(rows);
+}
+
+function setCollectionView(mode) {
+  state.collection.viewMode = mode;
+  $('#col-view-grid')?.classList.toggle('on', mode === 'grid');
+  $('#col-view-table')?.classList.toggle('on', mode === 'table');
+  if ($('#col-grid-wrap')) $('#col-grid-wrap').hidden = mode !== 'grid';
+  if ($('#col-table-wrap')) $('#col-table-wrap').hidden = mode !== 'table';
+  try { localStorage.setItem('piw:colView', mode); } catch {}
 }
 
 function updateCollectionCount(rows) {
   const selected = state.collection.items.filter(p => state.collection.selected.has(String(p.id)));
   const gold = selected.reduce((s, p) => s + (p.sellValue ?? 0), 0);
   $('#col-count').textContent = `${rows.length} de ${state.collection.items.length} · ${selected.length} selecionados ($ ${fmt(gold)})`;
+
+  const dock = $('#col-floating-dock');
+  if (dock) {
+    if (selected.length > 0) {
+      dock.classList.remove('hidden');
+      $('#dock-text').innerHTML = `<b>${selected.length}</b> marcados · Total: <span class="mono" style="color:var(--ok)">$ ${fmt(gold)}</span>`;
+    } else {
+      dock.classList.add('hidden');
+    }
+  }
 }
 
 // ---------- Venda rápida ----------
@@ -664,8 +739,37 @@ function bindUi() {
     for (const p of rows) state.collection.selected.delete(String(p.id));
     renderCollection();
   });
-  $('#col-sell').addEventListener('click', () => {
-    if (!state.collection.selected.size) return alert('Marque algum Pokémon na tabela.');
+  $('#col-view-grid')?.addEventListener('click', () => setCollectionView('grid'));
+  $('#col-view-table')?.addEventListener('click', () => setCollectionView('table'));
+  for (const btn of document.querySelectorAll('#col-quick-filters .pill-filter')) {
+    btn.addEventListener('click', () => {
+      for (const b of document.querySelectorAll('#col-quick-filters .pill-filter')) b.classList.remove('active');
+      btn.classList.add('active');
+      $('#col-tag').value = btn.dataset.tag;
+      renderCollection();
+    });
+  }
+  $('#dock-sell')?.addEventListener('click', () => {
+    if (!state.collection.selected.size) return;
+    openSell(state.collection.accountId, new Set(state.collection.selected));
+  });
+  $('#dock-clear')?.addEventListener('click', () => {
+    state.collection.selected.clear();
+    const rows = collectionRows();
+    updateCollectionCount(rows);
+    renderCollection();
+  });
+  $('#dock-lock')?.addEventListener('click', async () => {
+    const ids = [...state.collection.selected];
+    if (!ids.length) return;
+    for (const pokeId of ids) {
+      const p = state.collection.items.find(x => String(x.id) === pokeId);
+      if (p) await act(`/api/accounts/${state.collection.accountId}/lock`, { pokeId: p.id, locked: !p.locked });
+    }
+    await loadCollection();
+  });
+  $('#col-sell')?.addEventListener('click', () => {
+    if (!state.collection.selected.size) return alert('Marque algum Pokémon.');
     openSell(state.collection.accountId, new Set(state.collection.selected));
   });
   for (const id of ['#hl-account', '#hl-tag']) $(id).addEventListener('change', renderHighlights);
