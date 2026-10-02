@@ -21,6 +21,7 @@
   const TOKENS_KEY = 'pokeweb:tokens';
   const ACCOUNT_KEY = 'piw:accountId';
   let machineId = null;
+  let currentHunt = null;
   const { TAGS, classifyCollection, makeMarketClassifier, normalizePoke, primaryTag } = PIWClassifier;
 
   // ---------------- Ponte com o cockpit ----------------
@@ -67,7 +68,7 @@
     const accountId = store.getItem(ACCOUNT_KEY);
     const tokens = readTokens();
     if (!accountId || !tokens) return;
-    cockpit('POST', '/api/bridge/heartbeat', { accountId, tokens, cmid: machineId }).catch(error => {
+    cockpit('POST', '/api/bridge/heartbeat', { accountId, tokens, cmid: machineId, lastHunt: currentHunt }).catch(error => {
       if (error.status === 404) { store.removeItem(ACCOUNT_KEY); renderBridgeButton(); }
     });
   }
@@ -75,7 +76,7 @@
   setTimeout(heartbeat, 3000);
   page.addEventListener('pagehide', () => {
     const accountId = store.getItem(ACCOUNT_KEY);
-    if (accountId && location.pathname.startsWith('/play')) cockpit('POST', '/api/bridge/release', { accountId }).catch(() => {});
+    if (accountId && location.pathname.startsWith('/play')) cockpit('POST', '/api/bridge/release', { accountId, lastHunt: currentHunt }).catch(() => {});
   });
 
   function renderBridgeButton() {
@@ -139,7 +140,28 @@
       if (cmid) machineId = cmid;
     } catch { /* URL inesperada */ }
     const socket = new NativeWebSocket(...args);
+    const originalSend = socket.send;
+    socket.send = function(data) {
+      if (typeof data === 'string') {
+        try {
+          const msg = JSON.parse(data);
+          if (msg?.type === 'enter-hunt' && msg.slug) {
+            currentHunt = String(msg.slug);
+            heartbeat();
+          }
+        } catch { /* parse error */ }
+      }
+      return originalSend.apply(this, arguments);
+    };
     socket.addEventListener('message', event => {
+      if (typeof event.data === 'string') {
+        try {
+          const msg = JSON.parse(event.data);
+          if ((msg?.type === 'field-init' || msg?.type === 'hunt-resume') && msg.slug) {
+            currentHunt = String(msg.slug);
+          }
+        } catch { /* parse error */ }
+      }
       if (typeof event.data !== 'string' || !event.data.includes('"poke')) return;
       let message;
       try { message = JSON.parse(event.data); } catch { return; }

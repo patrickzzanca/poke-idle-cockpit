@@ -43,7 +43,7 @@ class Account extends EventEmitter {
     this.stopped = true;
     this.retries = 0;
     this.authFailures = 0;
-    this.timers = { reconnect: null, ping: null, status: null, hunt: null, analyzer: null };
+    this.timers = { reconnect: null, ping: null, status: null, hunt: null, analyzer: null, huntFallback: null };
     this.lastMessageAt = 0;
     this.pingSentAt = 0;
     this.pokes = null;
@@ -171,7 +171,15 @@ class Account extends EventEmitter {
       this.setState({ status: 'online', error: null, offlineSince: null, connectedAt: Date.now() });
       this.log('Conectada.');
       for (const type of ['pokes-get', 'autohelper-get', 'balls-get', 'analyzer-get']) this.send({ type });
-      if (this.lastHunt) this.send({ type: 'enter-hunt', slug: this.lastHunt });
+      // Aguarda hunt-resume do servidor para respeitar a hunt iniciada no navegador.
+      // Se após 3s o servidor não enviar hunt-resume nem field-init, usa a última hunt conhecida.
+      clearTimeout(this.timers.huntFallback);
+      this.timers.huntFallback = setTimeout(() => {
+        if (!this.state.lastKillAt && this.lastHunt) {
+          this.send({ type: 'enter-hunt', slug: this.lastHunt });
+          this.log(`Retomando hunt salva (${this.lastHunt}).`);
+        }
+      }, 3000);
       this.timers.ping = setInterval(() => this.checkAlive(), 10000);
       this.timers.analyzer = setInterval(() => this.send({ type: 'analyzer-get' }), 30000);
       this.timers.status = setInterval(() => {
@@ -249,10 +257,11 @@ class Account extends EventEmitter {
   clearTimers() {
     clearTimeout(this.timers.reconnect);
     clearTimeout(this.timers.hunt);
+    clearTimeout(this.timers.huntFallback);
     clearInterval(this.timers.ping);
     clearInterval(this.timers.status);
     clearInterval(this.timers.analyzer);
-    this.timers = { reconnect: null, ping: null, status: null, hunt: null, analyzer: null };
+    this.timers = { reconnect: null, ping: null, status: null, hunt: null, analyzer: null, huntFallback: null };
   }
 
   closeSocket() {
@@ -285,6 +294,7 @@ class Account extends EventEmitter {
         });
         break;
       case 'hunt-resume':
+        clearTimeout(this.timers.huntFallback);
         // O servidor informa onde a conta estava caçando; o cliente oficial viaja até lá e entra na hunt.
         if (message.slug) {
           this.setHunt(String(message.slug), message.name);
@@ -293,6 +303,7 @@ class Account extends EventEmitter {
         }
         break;
       case 'field-init':
+        clearTimeout(this.timers.huntFallback);
         if (message.slug) this.setHunt(String(message.slug), message.name);
         this.setState({ leaderFainted: false });
         break;

@@ -167,6 +167,12 @@ function analyzerBlock(z) {
       el('span', {}, `⚔️ ${fmt(z.killsPerHour)}/h`)));
 }
 
+async function changeHunt(accountId, currentHunt) {
+  const slug = prompt('Slug da hunt (ex: furious_scyther, gastly, wobbuffet, pinsir):', currentHunt || '');
+  if (!slug || !slug.trim()) return;
+  await act(`/api/accounts/${accountId}/hunt`, { slug: slug.trim() });
+}
+
 function renderAccountCard(a) {
   const [statusText, statusKind] = huntingStatus(a);
   const cooldown = a.cooldownUntil && a.cooldownUntil > Date.now() ? ` · cd ${Math.ceil((a.cooldownUntil - Date.now()) / 1000)}s` : '';
@@ -209,7 +215,27 @@ function renderAccountCard(a) {
           el('h3', { class: 'name' }, a.trainer?.name ?? a.name, a.trainer?.level != null ? el('span', { class: 'muted' }, ` · Nv ${a.trainer.level}`) : ''),
           el('span', { class: `pill-status ${statusKind}`, title: a.error ?? '' }, statusText + cooldown)
         ),
-        el('p', { class: 'hunt-target' }, a.hunt ? 'Caçando: ' : 'Fora de hunt', a.hunt ? el('b', {}, a.hunt) : '', a.lastKillAt ? ` · kill há ${ago(a.lastKillAt)}` : ''),
+        el('p', { class: 'hunt-target' },
+          a.hunt ? 'Caçando: ' : 'Fora de hunt',
+          a.hunt
+            ? el('b', {
+                style: 'cursor:pointer; text-decoration:underline dotted;',
+                title: 'Clique para trocar hunt',
+                onclick: () => changeHunt(a.id, a.hunt)
+              }, a.hunt)
+            : el('span', {
+                style: 'cursor:pointer; text-decoration:underline dotted;',
+                title: 'Clique para definir hunt',
+                onclick: () => changeHunt(a.id, '')
+              }, '(definir)'),
+          el('button', {
+            class: 'btn-hardware-subtle small',
+            style: 'margin-left:6px; padding:0 5px; font-size:10px; height:18px; line-height:16px;',
+            title: 'Trocar Hunt',
+            onclick: () => changeHunt(a.id, a.hunt)
+          }, '🎯 Trocar'),
+          a.lastKillAt ? ` · kill há ${ago(a.lastKillAt)}` : ''
+        ),
         el('div', { class: 'account-financials' },
           el('span', { class: 'mono bold' }, `$ ${fmt(a.gold)}`),
           el('span', { class: `mono font-semibold ${profit >= 0 ? 'pos' : 'neg'}` }, `${profit >= 0 ? '+' : '−'}$ ${fmt(Math.abs(profit))}/h`)

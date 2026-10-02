@@ -266,6 +266,7 @@ function createApp({ store, api, species }) {
       const account = getAccount(body.accountId);
       heartbeats.set(account.id, Date.now());
       account.updateTokens(body.tokens);
+      if (body.lastHunt) account.setHunt(body.lastHunt);
       if (account.state.status === 'replaced') account.handOff();
       return sendJson(res, 200, { ok: true, status: account.state.status });
     }
@@ -273,6 +274,7 @@ function createApp({ store, api, species }) {
       const body = await readBody(req);
       const account = getAccount(body.accountId);
       heartbeats.set(account.id, 0);
+      if (body.lastHunt) account.setHunt(body.lastHunt);
       setTimeout(() => { if (account.state.status === 'handedOff') account.resume(); }, 3000);
       return sendJson(res, 200, { ok: true });
     }
@@ -350,6 +352,14 @@ function createApp({ store, api, species }) {
     if (req.method === 'POST' && action === 'reconnect') {
       account.resume();
       return sendJson(res, 200, { ok: true });
+    }
+    if (req.method === 'POST' && action === 'hunt') {
+      const body = await readBody(req);
+      if (!body.slug) throw httpError(400, 'Slug da hunt obrigatório.');
+      account.setHunt(body.slug, body.name);
+      account.send({ type: 'enter-hunt', slug: body.slug });
+      pushLog({ at: Date.now(), account: account.id, accountName: account.name, text: `Hunt alterada para ${body.name ?? body.slug}.` });
+      return sendJson(res, 200, { ok: true, hunt: body.slug });
     }
     throw httpError(404, 'Rota não encontrada.');
   }
