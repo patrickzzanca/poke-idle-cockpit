@@ -13,6 +13,7 @@ const { scanMarket } = require('./market.js');
 const { buildSpeciesIndex } = require('../shared/species.js');
 const { classifyCollection } = require('../shared/classifier.js');
 const { DiscordNotifier } = require('./discord.js');
+const { getHuntRecommendation, getCachedRecommendation } = require('./hunter.js');
 
 const PORT = Number(process.env.PIW_PORT) || 8787;
 const HOST = process.env.PIW_HOST || '0.0.0.0';
@@ -154,6 +155,24 @@ function createApp({ store, api, species }) {
     return list.length;
   }
 
+  const pendingRecs = new Set();
+  function ensureRecommendation(account) {
+    const leader = account.state.leader;
+    if (!leader || !leader.speciesId || !leader.level) return;
+    if (getCachedRecommendation(leader)) return;
+    const key = `${account.id}:${leader.speciesId}:${leader.level}`;
+    if (pendingRecs.has(key)) return;
+    pendingRecs.add(key);
+    getHuntRecommendation(leader).then(rec => {
+      pendingRecs.delete(key);
+      if (rec && (rec.gold || rec.xp)) {
+        broadcast('account', summary(account));
+      }
+    }).catch(() => {
+      pendingRecs.delete(key);
+    });
+  }
+
   function summary(account) {
     const snap = account.snapshot();
     const list = account.pokes ? classified(account) : [];
@@ -163,6 +182,7 @@ function createApp({ store, api, species }) {
       autohelper: undefined,
       supplies: snap.autohelper ? supplies(snap) : null,
       leader: snap.leader ? { ...snap.leader, types: leaderProfile?.types ?? [] } : null,
+      recommendation: snap.leader ? getCachedRecommendation(snap.leader) : null,
       alerts: computeAlerts(snap, store.config.alerts),
       junkCount: list.filter(p => p.tags.includes('lixo')).length,
       junkRecent: junkRecent(account.id)
@@ -175,10 +195,17 @@ function createApp({ store, api, species }) {
       record, api, getCmid: store.getCmid,
       onTokens: tokens => store.upsert({ id: record.id, tokens })
     });
-    account.on('state', () => broadcast('account', summary(account)));
-    account.on('pokes', () => broadcast('account', summary(account)));
+    account.on('state', () => {
+      ensureRecommendation(account);
+      broadcast('account', summary(account));
+    });
+    account.on('pokes', () => {
+      ensureRecommendation(account);
+      broadcast('account', summary(account));
+    });
     account.on('log', pushLog);
     account.on('hunt', slug => store.upsert({ id: record.id, lastHunt: slug }));
+    account.on('leader', lead => store.upsert({ id: record.id, lastLeader: lead }));
     account.on('shiny-encounter', encounter => pushShinyEncounter(account, encounter));
     account.on('capture', ({ at, poke }) => {
       const item = classified(account).find(p => String(p.id) === String(poke.id));
@@ -370,6 +397,7 @@ function createApp({ store, api, species }) {
     }
 
     if (req.method === 'GET' && p === '/api/state') {
+      for (const a of accounts.values()) ensureRecommendation(a);
       return sendJson(res, 200, {
         accounts: [...accounts.values()].map(summary), highlights, shinies: sessionShinies, logs,
         warnings: store.warnings, config: store.config
@@ -393,6 +421,10 @@ function createApp({ store, api, species }) {
       return sendJson(res, 200, { ok: true });
     }
     if (req.method === 'GET' && action === 'pokes') return sendJson(res, 200, { pokes: collectionView(account) });
+    if (req.method === 'GET' && action === 'recommendation') {
+      const rec = await getHuntRecommendation(account.state.leader);
+      return sendJson(res, 200, rec);
+    }
     if (req.method === 'POST' && action === 'sell') return sendJson(res, 200, await sell(account, (await readBody(req)).pokeIds));
     if (req.method === 'POST' && action === 'lock') {
       const body = await readBody(req);

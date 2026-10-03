@@ -785,6 +785,183 @@ body.light-mode .session-visor-top {
 }
 
 /* ==========================================================================
+   Smart Hunter Visor (Piwdex Integration)
+   ========================================================================== */
+
+.smart-hunter-visor {
+  background-color: var(--lcd-screen);
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  position: relative;
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.25);
+}
+
+.smart-hunter-visor.loading {
+  opacity: 0.75;
+}
+
+.smart-hunter-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 10px;
+  color: var(--text-muted);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  padding-bottom: 6px;
+}
+
+body.light-mode .smart-hunter-header {
+  border-bottom-color: rgba(0, 0, 0, 0.06);
+}
+
+.smart-hunter-title-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+.smart-hunter-icon {
+  font-size: 11px;
+}
+
+.smart-hunter-meta-badge {
+  font-size: 9px;
+  background: rgba(255, 157, 85, 0.15);
+  color: #ff9d55;
+  border: 1px solid rgba(255, 157, 85, 0.3);
+  border-radius: 4px;
+  padding: 1px 4px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.smart-hunter-target-poke {
+  font-size: 10px;
+  font-weight: normal;
+}
+
+.smart-hunter-status {
+  font-size: 11px;
+}
+
+.smart-hunter-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+@media (max-width: 480px) {
+  .smart-hunter-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.hunter-option-card {
+  background: var(--surface-base);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  transition: border-color 0.2s, background-color 0.2s;
+}
+
+.hunter-option-card.active {
+  border-color: rgba(16, 185, 129, 0.4);
+  background: rgba(16, 185, 129, 0.04);
+}
+
+.hunter-option-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 4px;
+}
+
+.hunter-option-badge {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+.hunter-option-badge.gold {
+  background: rgba(245, 158, 11, 0.15);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.hunter-option-badge.xp {
+  background: rgba(59, 130, 246, 0.15);
+  color: #60a5fa;
+  border: 1px solid rgba(59, 130, 246, 0.3);
+}
+
+.hunter-active-badge {
+  font-size: 9px;
+  color: var(--accent-mint);
+  font-weight: 700;
+  background: rgba(16, 185, 129, 0.15);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+.hunter-option-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.hunter-spot-info {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.hunter-spot-name {
+  font-size: 13px;
+  color: var(--text-main);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hunter-spot-lvl {
+  font-size: 10px;
+}
+
+.hunter-spot-metrics {
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.hunter-switch-btn {
+  margin-top: 3px;
+  font-size: 10px;
+  padding: 3px 6px;
+  height: 22px;
+  line-height: 14px;
+  width: 100%;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.hunter-switch-btn:hover {
+  background: rgba(255, 255, 255, 0.09);
+  color: var(--text-main);
+}
+
+/* ==========================================================================
    Gauges Panel
    ========================================================================== */
 

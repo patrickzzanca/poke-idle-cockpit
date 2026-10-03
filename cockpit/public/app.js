@@ -306,6 +306,98 @@ async function changeHunt(accountId, currentHunt) {
   await act(`/api/accounts/${accountId}/hunt`, { slug: slug.trim() });
 }
 
+async function setDirectHunt(accountId, slug, name) {
+  if (!slug) return;
+  if (!confirm(`Trocar a hunt da conta para "${name || slug}"?`)) return;
+  await act(`/api/accounts/${accountId}/hunt`, { slug: slug.trim(), name: name ? name.trim() : slug.trim() });
+}
+
+function smartHunterVisor(a) {
+  const rec = a.recommendation;
+  const leader = a.leader;
+  if (!leader) return null;
+
+  const currentHuntNorm = (a.hunt || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
+  if (!rec || (!rec.gold && !rec.xp)) {
+    return el('div', { class: 'smart-hunter-visor loading' },
+      el('div', { class: 'smart-hunter-header' },
+        el('div', { class: 'smart-hunter-title-row' },
+          el('span', { class: 'smart-hunter-icon' }, '🎯'),
+          el('span', { class: 'mono bold' }, 'SMART HUNTER'),
+          el('span', { class: 'smart-hunter-meta-badge' }, 'Piwdex')
+        ),
+        el('span', { class: 'smart-hunter-status mono muted' }, rec?.error ? 'Falha ao consultar Piwdex' : 'Calculando rota ideal…')
+      )
+    );
+  }
+
+  const gold = rec.gold;
+  const xp = rec.xp;
+  const isGoldActive = gold && currentHuntNorm && (currentHuntNorm === gold.slug.toLowerCase().replace(/[^a-z0-9]/g, '') || currentHuntNorm === gold.name.toLowerCase().replace(/[^a-z0-9]/g, ''));
+  const isXpActive = xp && currentHuntNorm && (currentHuntNorm === xp.slug.toLowerCase().replace(/[^a-z0-9]/g, '') || currentHuntNorm === xp.name.toLowerCase().replace(/[^a-z0-9]/g, ''));
+
+  const renderOption = (type, title, spot, isActive) => {
+    if (!spot) return null;
+    return el('div', { class: `hunter-option-card ${isActive ? 'active' : ''}` },
+      el('div', { class: 'hunter-option-top' },
+        el('span', { class: `hunter-option-badge ${type}` }, title),
+        isActive ? el('span', { class: 'hunter-active-badge mono' }, '✓ Hunt Atual') : null
+      ),
+      el('div', { class: 'hunter-option-body' },
+        el('div', { class: 'hunter-spot-info' },
+          el('b', { class: 'hunter-spot-name' }, spot.name),
+          el('span', { class: 'hunter-spot-lvl muted mono' }, ` Nv ${spot.level}`)
+        ),
+        el('div', { class: 'hunter-spot-metrics mono' },
+          type === 'gold'
+            ? [
+                el('span', { class: 'pos bold' }, `$ ${fmt(spot.goldPerHour)}/h`),
+                el('span', { class: 'muted text-xs' }, ` · ${fmt(spot.xpHour)} XP/h`)
+              ]
+            : [
+                el('span', { class: 'accent bold' }, `${fmt(spot.xpHour)} XP/h`),
+                el('span', { class: 'muted text-xs' }, ` · $ ${fmt(spot.goldPerHour)}/h`)
+              ]
+        )
+      ),
+      !isActive ? el('button', {
+        class: 'btn-hardware-subtle hunter-switch-btn',
+        title: `Mudar para ${spot.name}`,
+        onclick: () => setDirectHunt(a.id, spot.slug, spot.name)
+      }, `Ir para ${spot.name} ➔`) : null
+    );
+  };
+
+  return el('div', { class: 'smart-hunter-visor' },
+    el('div', { class: 'smart-hunter-header' },
+      el('div', { class: 'smart-hunter-title-row' },
+        el('span', { class: 'smart-hunter-icon' }, '🎯'),
+        el('span', { class: 'mono bold' }, 'SMART HUNTER'),
+        el('span', { class: 'smart-hunter-meta-badge' }, 'Piwdex'),
+        rec.leader?.name ? el('span', { class: 'smart-hunter-target-poke mono muted' }, `(${rec.leader.name} Nv ${rec.leader.level})`) : null
+      ),
+      el('button', {
+        class: 'btn-icon-subtle',
+        style: 'font-size:11px; padding:2px 4px; cursor:pointer;',
+        title: 'Recalcular no Piwdex',
+        onclick: async (e) => {
+          e.target.textContent = '⏳';
+          try {
+            await act(`/api/accounts/${a.id}/recommendation`);
+          } finally {
+            e.target.textContent = '🔄';
+          }
+        }
+      }, '🔄')
+    ),
+    el('div', { class: 'smart-hunter-grid' },
+      renderOption('gold', '💰 Máx Dólares', gold, isGoldActive),
+      renderOption('xp', '⚡ Mais XP', xp, isXpActive)
+    )
+  );
+}
+
 function renderAccountCard(a) {
   const [statusText, statusKind] = huntingStatus(a);
   const cooldown = a.cooldownUntil && a.cooldownUntil > Date.now() ? ` · cd ${Math.ceil((a.cooldownUntil - Date.now()) / 1000)}s` : '';
@@ -384,6 +476,7 @@ function renderAccountCard(a) {
       ) : el('div', { class: 'lcd-pocket-large muted' }, 'Sem líder')
     ),
     sessionVisor(z, a),
+    smartHunterVisor(a),
     el('div', { class: 'gauges-panel' },
       el('div', { class: 'gauge-item' },
         el('div', { class: 'gauge-label' },

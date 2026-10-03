@@ -37,6 +37,7 @@ class Account extends EventEmitter {
     this.name = record.name;
     this.tokens = record.tokens;
     this.lastHunt = record.lastHunt ?? null;
+    this.lastLeader = record.lastLeader ?? null;
     this.api = api;
     this.onTokens = onTokens;
     this.socket = null;
@@ -51,7 +52,7 @@ class Account extends EventEmitter {
     this.state = {
       status: 'offline', error: null, offlineSince: Date.now(),
       gold: null, diamonds: null, trainer: { name: record.name, level: null },
-      leader: null, hunt: this.lastHunt, box: null, autohelper: null,
+      leader: this.lastLeader, hunt: this.lastHunt, box: null, autohelper: null,
       leaderFainted: false, cooldownUntil: null, analyzer: null, lastKillAt: null, connectedAt: null
     };
   }
@@ -428,12 +429,18 @@ class Account extends EventEmitter {
 
   updateLeader() {
     const leader = this.pokes?.find(p => p?.leader) ?? this.pokes?.find(p => p?.team) ?? null;
-    this.setState({
-      leader: leader ? {
+    if (leader) {
+      this.lastLeader = {
         name: leader.name, level: leader.level, quality: leader.quality, ivTotal: leader.ivTotal,
         speciesId: leader.speciesId ?? leader.pokeId ?? null, shiny: Boolean(leader.shiny),
-        hp: leader.hp ?? null, maxHp: leader.maxHp ?? null
-      } : null
+        hp: leader.hp ?? null, maxHp: leader.maxHp ?? null,
+        power: leader.power ?? null,
+        ivs: leader.ivs ?? null
+      };
+      this.emit('leader', this.lastLeader);
+    }
+    this.setState({
+      leader: this.lastLeader ?? null
     });
   }
 
