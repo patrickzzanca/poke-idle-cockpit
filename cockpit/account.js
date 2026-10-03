@@ -7,7 +7,6 @@ const { socketUrl } = require('./ws-url.js');
 
 const SAMPLES_DIR = path.join(__dirname, '.cache', 'samples');
 const FATAL_CODES = {
-  4003: 'Jogo em manutenção.',
   4006: 'Limite de conexões por IP atingido.',
   4007: 'Limite de conexões por máquina atingido.',
   4008: 'Nome bloqueado: entre no jogo para resolver.',
@@ -191,7 +190,7 @@ class Account extends EventEmitter {
       }, 60000);
     };
     socket.onmessage = event => { if (this.socket === socket) this.handleRaw(event.data); };
-    socket.onclose = event => { if (this.socket === socket) this.handleClose(event.code); };
+    socket.onclose = event => { if (this.socket === socket) this.handleClose(event.code, event.reason); };
     socket.onerror = () => { try { socket.close(); } catch { /* já fechado */ } };
   }
 
@@ -216,7 +215,7 @@ class Account extends EventEmitter {
     }
   }
 
-  handleClose(code) {
+  handleClose(code, reason) {
     this.socket = null;
     this.clearTimers();
     if (this.stopped) return;
@@ -224,6 +223,11 @@ class Account extends EventEmitter {
       this.stopped = true;
       this.setState({ status: 'replaced', error: 'Conta aberta em outro lugar. Clique em Reconectar para retomar aqui.' });
       this.log('Sessão substituída (conta aberta em outro lugar).');
+      return;
+    }
+    if (code === 4003) {
+      const msg = reason === 'wrong-shard' ? 'Shard incorreto (wrong-shard).' : 'Jogo em manutenção.';
+      this.scheduleReconnect(msg);
       return;
     }
     if (FATAL_CODES[code]) return this.fail(FATAL_CODES[code]);

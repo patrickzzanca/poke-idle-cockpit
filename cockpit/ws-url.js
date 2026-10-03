@@ -1,8 +1,8 @@
 'use strict';
 
-// Mesma regra de shard do cliente oficial: djb2(sub do JWT) % 66.
+// Mesma regra de shard do cliente oficial: djb2(sub do JWT) % 88.
 const DEFAULT_BASE = 'wss://poke.idleworld.online/ws';
-const SHARDS = 66;
+const SHARDS = 88;
 
 function djb2Shard(text, shards) {
   if (shards <= 1) return 0;
@@ -30,7 +30,7 @@ function socketUrl(accessToken, { base = DEFAULT_BASE, shards = SHARDS, cmid = n
   } catch {
     url = base;
   }
-  return `${url}?token=${encodeURIComponent(accessToken)}${cmid ? `&cmid=${encodeURIComponent(cmid)}` : ''}`;
+  return `${url}?token=${encodeURIComponent(accessToken)}&v=2${cmid ? `&cmid=${encodeURIComponent(cmid)}` : ''}`;
 }
 
-module.exports = { socketUrl, djb2Shard };
+module.exports = { socketUrl, djb2Shard, SHARDS };
