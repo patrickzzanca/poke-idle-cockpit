@@ -1180,10 +1180,11 @@ function renderCommodityTickers() {
     if (chartBox) {
       const sparkline = renderSparklineSvg(t.history?.diamonds, 'min');
       const depthBars = renderDepthBars(t.diamonds.depth, '$', true);
-      chartBox.replaceChildren(
+      const nodes = [
         sparkline ? el('div', { class: 'sparkline-wrap' }, el('div', { class: 'sparkline-label text-xs muted mono' }, 'Histórico de Preço'), sparkline) : null,
         el('div', { class: 'depth-wrap' }, el('div', { class: 'depth-header text-xs muted mono' }, 'Profundidade das Menores Ofertas'), depthBars)
-      );
+      ].filter(Boolean);
+      chartBox.replaceChildren(...nodes);
     }
   }
 
@@ -1200,10 +1201,11 @@ function renderCommodityTickers() {
     if (chartBox) {
       const sparkline = renderSparklineSvg(t.history?.pheromones, 'diaMin');
       const depthBars = renderDepthBars(t.pheromones.diamonds?.depth, '💎', false);
-      chartBox.replaceChildren(
+      const nodes = [
         sparkline ? el('div', { class: 'sparkline-wrap' }, el('div', { class: 'sparkline-label text-xs muted mono' }, 'Histórico em 💎'), sparkline) : null,
         el('div', { class: 'depth-wrap' }, el('div', { class: 'depth-header text-xs muted mono' }, 'Profundidade em 💎 (Menores Preços)'), depthBars)
-      );
+      ].filter(Boolean);
+      chartBox.replaceChildren(...nodes);
     }
   }
 }
