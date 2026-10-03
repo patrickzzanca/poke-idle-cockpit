@@ -371,7 +371,6 @@ function createApp({ store, api, species }) {
     }
 
     if (req.method === 'GET' && p === '/api/state') {
-      for (const a of accounts.values()) ensureRecommendation(a);
       return sendJson(res, 200, {
         accounts: [...accounts.values()].map(summary), highlights, shinies: sessionShinies, logs,
         warnings: store.warnings, config: store.config
