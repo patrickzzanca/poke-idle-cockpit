@@ -406,8 +406,11 @@ function createApp({ store, api, species }) {
         const res = await account.withAuth(token => api.marketSearch(token, params));
         const rawListings = Array.isArray(res?.listings) ? res.listings : (Array.isArray(res) ? res : []);
         for (const item of rawListings) {
-          const price = Number(item.price ?? item.totalPrice);
-          if (item.offerOnly || !price || (rule.maxPrice && price > rule.maxPrice)) continue;
+          const price = Number(item.price ?? item.totalPrice) || 0;
+          if (rule.maxPrice && price > rule.maxPrice) continue;
+          if (item.offerOnly && rule.maxPrice) continue;
+          if (rule.minQuality && (item.quality == null || Number(item.quality) < Number(rule.minQuality))) continue;
+          if (rule.minIv && ((item.ivTotal ?? item.iv) < Number(rule.minIv))) continue;
           if (rule.currency && String(item.currency).toUpperCase() !== String(rule.currency).toUpperCase()) continue;
           const matchKey = `${rule.id}:${item.id}`;
           if (!radarSeenIds.has(matchKey)) {

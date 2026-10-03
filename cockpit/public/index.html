@@ -172,11 +172,15 @@
         <label>Tag <select id="mk-tag"><option value="all">Qualquer tag</option></select></label>
         <label>Elemento <select id="mk-element"><option value="">Todos</option></select></label>
         <label>Ordenar <select id="mk-sort"><option value="diff">Maior upgrade (+IV)</option><option value="iv">Maior IV</option><option value="quality">Maior Q</option><option value="price">Menor preço</option></select></label>
-        <label>Busca <input id="mk-text" list="species-datalist" placeholder="Nome ou selecione da lista"></label>
+        <label class="autocomplete-wrap">Busca
+          <input id="mk-text" autocomplete="off" placeholder="Espécie (ex: Pikachu)" style="min-width: 170px;">
+          <div id="mk-text-dropdown" class="autocomplete-dropdown hidden"></div>
+        </label>
         <label>Min IV <input id="mk-min-iv" type="number" min="0" max="186" placeholder="0" style="width: 55px;"></label>
         <label>Min Q <input id="mk-min-q" type="number" step="0.05" min="0" placeholder="0.00" style="width: 60px;"></label>
         <label>Preço máx <input id="mk-max-price" type="number" min="0" placeholder="Máx" style="width: 80px;"></label>
         <label>Moeda <select id="mk-currency"><option value="">Todas</option><option value="GOLD">Gold ($)</option><option value="DIAMONDS">Diamonds (💎)</option></select></label>
+        <label class="checkbox-label"><input type="checkbox" id="mk-bargain-only"> Apenas Pechinchas 🏷️</label>
         <label class="checkbox-label"><input type="checkbox" id="mk-shiny-only"> Apenas Shiny ✨</label>
         <label class="checkbox-label"><input type="checkbox" id="mk-hide-offers"> Ocultar só oferta</label>
         <button id="mk-fast-search" class="btn-hardware-action" title="Busca instantânea na API com os filtros">⚡ Busca Rápida</button>
@@ -203,12 +207,16 @@
               <label>Nome da Regra <input id="wl-name" placeholder="Ex: Scyther Top ou Shiny Barato" required></label>
             </div>
             <div class="form-row grid-2">
-              <label>Espécie <input id="wl-species" list="species-datalist" placeholder="Qualquer Pokémon"></label>
-              <label>Moeda <select id="wl-currency"><option value="">Qualquer moeda (Gold ou 💎)</option><option value="GOLD">Gold ($)</option><option value="DIAMONDS">Diamonds (💎)</option></select></label>
+              <label class="autocomplete-wrap">Espécie
+                <input id="wl-species" autocomplete="off" placeholder="Qualquer Pokémon">
+                <div id="wl-species-dropdown" class="autocomplete-dropdown hidden"></div>
+              </label>
+              <label>Moeda <select id="wl-currency"><option value="">Todas (Gold / 💎)</option><option value="GOLD">Gold ($)</option><option value="DIAMONDS">Diamonds (💎)</option></select></label>
             </div>
-            <div class="form-row grid-2">
-              <label>Preço Máximo <input id="wl-max-price" type="number" min="1" placeholder="Ex: 500000" required></label>
-              <label>IV Mínimo <input id="wl-min-iv" type="number" min="0" max="186" placeholder="Ex: 170"></label>
+            <div class="form-row grid-3">
+              <label>Min IV <input id="wl-min-iv" type="number" min="0" max="186" placeholder="0"></label>
+              <label>Min Q <input id="wl-min-q" type="number" step="0.05" min="0" placeholder="0.00"></label>
+              <label>Preço Máx <input id="wl-max-price" type="number" min="1" placeholder="Qualquer"></label>
             </div>
             <div class="form-row flex-between" style="margin-top:6px;">
               <label class="checkbox-label"><input type="checkbox" id="wl-shiny-only"> Apenas Shiny ✨</label>

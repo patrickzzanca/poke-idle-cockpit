@@ -943,12 +943,14 @@ function renderMarket() {
   const currency = $('#mk-currency').value;
   const shinyOnly = $('#mk-shiny-only').checked;
   const hideOffers = $('#mk-hide-offers').checked;
+  const bargainOnly = $('#mk-bargain-only')?.checked;
   const tagFilter = $('#mk-tag').value;
   const elementFilter = $('#mk-element').value;
   const sortBy = $('#mk-sort').value;
 
   const filtered = rawResults.filter(item => {
     if (query && !item.name.toLowerCase().includes(query) && !item.comparison?.myBest?.name?.toLowerCase().includes(query)) return false;
+    if (bargainOnly && !item.isBargain) return false;
     if (minIv > 0 && item.ivTotal < minIv) return false;
     if (minQ > 0 && item.quality < minQ) return false;
     if (shinyOnly && !item.shiny) return false;
@@ -1221,6 +1223,56 @@ async function loadSpeciesCatalog() {
   } catch {}
 }
 
+function setupSpeciesAutocomplete(inputId, dropdownId, onSelect) {
+  const input = $(inputId);
+  const dropdown = $(dropdownId);
+  if (!input || !dropdown) return;
+
+  function show(list) {
+    if (!list.length) {
+      dropdown.classList.add('hidden');
+      return;
+    }
+    const items = list.slice(0, 10).map(s => {
+      const row = el('div', { class: 'autocomplete-item' },
+        el('span', { class: 'autocomplete-name bold' }, s.name),
+        el('span', { class: 'autocomplete-types' },
+          el('span', { class: 'type-badge mini', style: `--type:var(--type-${s.type1})` }, s.type1),
+          s.type2 ? el('span', { class: 'type-badge mini', style: `--type:var(--type-${s.type2})` }, s.type2) : null
+        )
+      );
+      row.onmousedown = e => {
+        e.preventDefault();
+        input.value = s.name;
+        dropdown.classList.add('hidden');
+        if (onSelect) onSelect(s);
+      };
+      return row;
+    });
+    dropdown.replaceChildren(...items);
+    dropdown.classList.remove('hidden');
+  }
+
+  function filter() {
+    const q = input.value.trim().toLowerCase();
+    if (!q) {
+      dropdown.classList.add('hidden');
+      return;
+    }
+    const matches = (state.speciesList || []).filter(s => s.name.toLowerCase().includes(q));
+    show(matches);
+  }
+
+  input.addEventListener('input', filter);
+  input.addEventListener('focus', filter);
+  input.addEventListener('blur', () => {
+    setTimeout(() => dropdown.classList.add('hidden'), 180);
+  });
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Escape') dropdown.classList.add('hidden');
+  });
+}
+
 // ---------- Radar & Wishlist ----------
 
 async function loadRadar() {
@@ -1239,30 +1291,38 @@ function renderRadar() {
   if ($('#wishlist-count')) $('#wishlist-count').textContent = `${wishlist.length} ${wishlist.length === 1 ? 'regra' : 'regras'}`;
 
   // Render wishlist rules
-  const ruleNodes = wishlist.map(rule => el('div', { class: 'wishlist-item-card' },
-    el('div', { class: 'wishlist-item-main' },
-      el('div', { class: 'wishlist-item-title' },
-        el('b', {}, rule.name),
-        rule.speciesName ? el('span', { class: 'tag', style: '--tag:var(--accent-blue)' }, rule.speciesName) : el('span', { class: 'tag', style: '--tag:var(--text-muted)' }, 'Qualquer Poke'),
-        rule.currency ? (rule.currency === 'DIAMONDS' ? el('span', { class: 'tag', style: '--tag:var(--accent-blue)' }, '💎 Só Diamonds') : el('span', { class: 'tag', style: '--tag:var(--accent-mint)' }, '💰 Só Gold')) : el('span', { class: 'tag', style: '--tag:var(--text-muted)' }, '🌐 Gold ou 💎'),
-        rule.shinyOnly ? el('span', { class: 'tag', style: '--tag:#f0b71e' }, '✨ Só Shiny') : null
+  const ruleNodes = wishlist.map(rule => {
+    const critParts = [];
+    if (rule.minIv) critParts.push(`IV ≥ ${rule.minIv}`);
+    if (rule.minQuality) critParts.push(`Q ≥ ${Number(rule.minQuality).toFixed(2)}`);
+    if (rule.maxPrice) {
+      critParts.push(`Teto: ${rule.currency === 'DIAMONDS' ? '💎' : '$'} ${fmt(rule.maxPrice)}`);
+    } else {
+      critParts.push('Qualquer preço');
+    }
+
+    return el('div', { class: 'wishlist-item-card' },
+      el('div', { class: 'wishlist-item-main' },
+        el('div', { class: 'wishlist-item-title' },
+          el('b', {}, rule.name),
+          rule.speciesName ? el('span', { class: 'tag', style: '--tag:var(--accent-blue)' }, rule.speciesName) : el('span', { class: 'tag', style: '--tag:var(--text-muted)' }, 'Qualquer Poke'),
+          rule.currency ? (rule.currency === 'DIAMONDS' ? el('span', { class: 'tag', style: '--tag:var(--accent-blue)' }, '💎 Só Diamonds') : el('span', { class: 'tag', style: '--tag:var(--accent-mint)' }, '💰 Só Gold')) : el('span', { class: 'tag', style: '--tag:var(--text-muted)' }, '🌐 Gold ou 💎'),
+          rule.shinyOnly ? el('span', { class: 'tag', style: '--tag:#f0b71e' }, '✨ Só Shiny') : null
+        ),
+        el('div', { class: 'wishlist-item-crit mono text-xs muted' }, critParts.join(' · '))
       ),
-      el('div', { class: 'wishlist-item-crit mono text-xs muted' },
-        rule.minIv ? `IV ≥ ${rule.minIv} · ` : '',
-        `Teto: ${rule.currency === 'DIAMONDS' ? '💎' : '$'} ${fmt(rule.maxPrice)}`
-      )
-    ),
-    el('button', {
-      type: 'button',
-      class: 'btn-icon-subtle',
-      title: 'Remover regra',
-      onclick: async () => {
-        if (!confirm(`Remover regra "${rule.name}"?`)) return;
-        await api(`/api/radar/wishlist/${rule.id}`, { method: 'DELETE' });
-        loadRadar();
-      }
-    }, '✕')
-  ));
+      el('button', {
+        type: 'button',
+        class: 'btn-icon-subtle',
+        title: 'Remover regra',
+        onclick: async () => {
+          if (!confirm(`Remover regra "${rule.name}"?`)) return;
+          await api(`/api/radar/wishlist/${rule.id}`, { method: 'DELETE' });
+          loadRadar();
+        }
+      }, '✕')
+    );
+  });
 
   const wlContainer = $('#wishlist-container');
   if (wlContainer) {
@@ -1357,8 +1417,10 @@ async function handleAddWishlistRule(e) {
   const name = $('#wl-name').value.trim();
   const speciesName = $('#wl-species').value.trim();
   const currency = $('#wl-currency').value;
-  const maxPrice = Number($('#wl-max-price').value);
+  const maxPriceRaw = $('#wl-max-price').value.trim();
+  const maxPrice = maxPriceRaw ? Number(maxPriceRaw) : undefined;
   const minIv = $('#wl-min-iv').value ? Number($('#wl-min-iv').value) : undefined;
+  const minQuality = $('#wl-min-q')?.value ? Number($('#wl-min-q').value) : undefined;
   const shinyOnly = $('#wl-shiny-only').checked;
 
   let speciesId;
@@ -1370,12 +1432,13 @@ async function handleAddWishlistRule(e) {
   try {
     await api('/api/radar/wishlist', {
       method: 'POST',
-      body: { name, speciesId, speciesName, currency, maxPrice, minIv, shinyOnly }
+      body: { name, speciesId, speciesName, currency, maxPrice, minIv, minQuality, shinyOnly }
     });
     $('#wl-name').value = '';
     $('#wl-species').value = '';
     $('#wl-max-price').value = '';
     $('#wl-min-iv').value = '';
+    if ($('#wl-min-q')) $('#wl-min-q').value = '';
     $('#wl-shiny-only').checked = false;
     await loadRadar();
   } catch (err) {
@@ -1574,7 +1637,7 @@ function bindUi() {
   $('#mk-search').addEventListener('click', searchMarket);
   $('#mk-cancel').addEventListener('click', () => act('/api/market/cancel'));
   for (const id of ['#mk-tag', '#mk-element', '#mk-sort', '#mk-currency']) $(id).addEventListener('change', renderMarket);
-  for (const id of ['#mk-shiny-only', '#mk-hide-offers']) $(id).addEventListener('change', renderMarket);
+  for (const id of ['#mk-shiny-only', '#mk-hide-offers', '#mk-bargain-only']) $(id)?.addEventListener('change', renderMarket);
   for (const id of ['#mk-text', '#mk-min-iv', '#mk-min-q', '#mk-max-price']) $(id).addEventListener('input', renderMarket);
   $('#radar-check-now')?.addEventListener('click', checkRadarNow);
   $('#radar-clear-btn')?.addEventListener('click', clearRadar);
@@ -1588,6 +1651,10 @@ function bindUi() {
     $('#mk-text').value = 'Strange Pheromone';
     fastSearchMarket();
   });
+  setupSpeciesAutocomplete('#mk-text', '#mk-text-dropdown', () => {
+    fastSearchMarket();
+  });
+  setupSpeciesAutocomplete('#wl-species', '#wl-species-dropdown');
   for (const btn of document.querySelectorAll('#radar-currency-filters button')) {
     btn.addEventListener('click', () => {
       for (const b of document.querySelectorAll('#radar-currency-filters button')) b.classList.remove('active');

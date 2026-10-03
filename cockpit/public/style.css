@@ -1704,6 +1704,81 @@ dialog:has(.dlg-wide) {
   gap: 10px;
 }
 
+.radar-form .form-row.grid-3 {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 10px;
+}
+
+.radar-form input,
+.radar-form select {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+input::-webkit-calendar-picker-indicator {
+  display: none !important;
+  opacity: 0;
+}
+
+/* Autocomplete Dropdown Customizado */
+.autocomplete-wrap {
+  position: relative;
+}
+
+.autocomplete-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 100%;
+  width: max-content;
+  max-width: 260px;
+  background: var(--surface-card);
+  border: 1px solid var(--border-focus);
+  border-radius: 8px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.5);
+  max-height: 240px;
+  overflow-y: auto;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+}
+
+.autocomplete-dropdown.hidden {
+  display: none !important;
+}
+
+.autocomplete-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 10px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border-subtle);
+  transition: background 0.12s ease;
+}
+
+.autocomplete-item:last-child {
+  border-bottom: none;
+}
+
+.autocomplete-item:hover {
+  background: var(--surface-elevated);
+}
+
+.autocomplete-name {
+  font-size: 12px;
+  color: var(--text-main);
+  white-space: nowrap;
+}
+
+.autocomplete-types {
+  display: flex;
+  gap: 3px;
+}
+
 .radar-form .form-row.flex-between {
   flex-direction: row;
   justify-content: space-between;
