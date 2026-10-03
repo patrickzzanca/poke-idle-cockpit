@@ -121,6 +121,52 @@
     <!-- TAB 4: MERCADO -->
     <section id="tab-mercado" class="tab" hidden>
       <datalist id="species-datalist"></datalist>
+
+      <!-- Banner de Cotações & Commodities -->
+      <div id="market-commodities-banner" class="market-banner hardware-card">
+        <div class="ticker-header-row">
+          <span class="mono bold text-xs muted">📈 COTAÇÕES DO MERCADO GLOBAL (TEMPO REAL)</span>
+          <button id="ticker-refresh-btn" type="button" class="btn-hardware-subtle small" title="Atualizar cotações">🔄 Atualizar</button>
+        </div>
+        <div class="ticker-grid">
+          <!-- Card 1: Diamante -->
+          <div class="ticker-card" id="ticker-diamond">
+            <div class="ticker-top">
+              <div class="ticker-title">
+                <span class="ticker-icon">💎</span>
+                <div>
+                  <div class="ticker-name">Diamante</div>
+                  <div class="ticker-sub mono text-xs muted" id="dia-sub">Carregando ofertas…</div>
+                </div>
+              </div>
+              <div class="ticker-price-box">
+                <div class="ticker-price mono pos" id="dia-price">—</div>
+                <div class="ticker-stat mono text-xs" id="dia-stat">Menor Preço Ativo</div>
+              </div>
+            </div>
+            <div class="ticker-chart-box" id="dia-chart"></div>
+          </div>
+
+          <!-- Card 2: Feromônio de Breed -->
+          <div class="ticker-card" id="ticker-pheromone">
+            <div class="ticker-top">
+              <div class="ticker-title">
+                <span class="ticker-icon">🧪</span>
+                <div>
+                  <div class="ticker-name">Strange Pheromone (Breed)</div>
+                  <div class="ticker-sub mono text-xs muted" id="phero-sub">Carregando ofertas…</div>
+                </div>
+              </div>
+              <div class="ticker-price-box">
+                <div class="ticker-price mono" id="phero-price">—</div>
+                <div class="ticker-stat mono text-xs" id="phero-stat">Menor Preço Ativo</div>
+              </div>
+            </div>
+            <div class="ticker-chart-box" id="phero-chart"></div>
+          </div>
+        </div>
+      </div>
+
       <div class="controls hardware-card">
         <label>Comparar com <select id="mk-account"></select></label>
         <label>Tag <select id="mk-tag"><option value="all">Qualquer tag</option></select></label>
@@ -158,7 +204,7 @@
             </div>
             <div class="form-row grid-2">
               <label>Espécie <input id="wl-species" list="species-datalist" placeholder="Qualquer Pokémon"></label>
-              <label>Moeda <select id="wl-currency"><option value="GOLD">Gold ($)</option><option value="DIAMONDS">Diamonds (💎)</option></select></label>
+              <label>Moeda <select id="wl-currency"><option value="">Qualquer moeda (Gold ou 💎)</option><option value="GOLD">Gold ($)</option><option value="DIAMONDS">Diamonds (💎)</option></select></label>
             </div>
             <div class="form-row grid-2">
               <label>Preço Máximo <input id="wl-max-price" type="number" min="1" placeholder="Ex: 500000" required></label>
@@ -186,6 +232,14 @@
             </div>
             <button id="radar-clear-btn" type="button" class="btn-hardware-subtle small" title="Limpar lista">🗑️ Limpar Vistos</button>
           </div>
+
+          <!-- Filtros de moeda no radar -->
+          <div id="radar-currency-filters" class="radar-filter-bar">
+            <button type="button" class="pill-filter active" data-curr="">Todas</button>
+            <button type="button" class="pill-filter" data-curr="GOLD">💰 Só Gold ($)</button>
+            <button type="button" class="pill-filter" data-curr="DIAMONDS">💎 Só Diamantes</button>
+          </div>
+
           <div id="radar-matches-list" class="radar-matches-container"></div>
         </div>
       </div>

@@ -1918,3 +1918,239 @@ dialog:has(.dlg-wide) {
   border-radius: 8px;
 }
 
+/* ==========================================================================
+   Market Commodities Banner & Depth Charts
+   ========================================================================== */
+
+.market-banner {
+  margin-bottom: 16px;
+  padding: 14px 16px;
+  background: var(--surface-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+}
+
+.ticker-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.ticker-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+@media (max-width: 820px) {
+  .ticker-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.ticker-card {
+  background: var(--surface-base);
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  padding: 12px 16px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ticker-card:hover {
+  border-color: rgba(34, 197, 94, 0.4);
+  transform: translateY(-1px);
+}
+
+.ticker-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.ticker-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ticker-icon {
+  font-size: 24px;
+  line-height: 1;
+}
+
+.ticker-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.ticker-sub {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.ticker-price-box {
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.ticker-price {
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--text-main);
+}
+
+.ticker-stat {
+  font-size: 10px;
+  color: var(--text-faint);
+  margin-top: 1px;
+}
+
+.ticker-chart-box {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 10px;
+}
+
+.sparkline-wrap, .depth-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sparkline-label, .depth-header {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.ticker-sparkline-svg {
+  width: 100%;
+  height: 32px;
+  overflow: visible;
+}
+
+.depth-bars-container {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  height: 52px;
+  padding-top: 4px;
+}
+
+.depth-bar-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  height: 100%;
+  min-width: 0;
+}
+
+.depth-bar-fill-wrap {
+  width: 100%;
+  height: 30px;
+  display: flex;
+  align-items: flex-end;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 4px 4px 0 0;
+}
+
+.depth-bar-fill {
+  width: 100%;
+  background: linear-gradient(180deg, var(--accent-mint) 0%, rgba(34, 197, 94, 0.35) 100%);
+  border-radius: 4px 4px 0 0;
+  min-height: 4px;
+}
+
+.depth-bar-label {
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--text-main);
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+  text-align: center;
+}
+
+.depth-bar-qty {
+  font-size: 8px;
+  color: var(--text-muted);
+}
+
+/* ==========================================================================
+   Multi-Badge Layout & Badges
+   ========================================================================== */
+
+.market-badges-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  justify-content: flex-end;
+  align-items: center;
+  margin-top: 5px;
+}
+
+.badge-upgrade {
+  background: rgba(56, 189, 248, 0.12) !important;
+  color: var(--accent-blue) !important;
+  border: 1px solid rgba(56, 189, 248, 0.3) !important;
+  border-radius: 6px;
+  padding: 2px 6px;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.badge-new-species {
+  background: rgba(168, 85, 247, 0.12) !important;
+  color: #c084fc !important;
+  border: 1px solid rgba(168, 85, 247, 0.3) !important;
+  border-radius: 6px;
+  padding: 2px 6px;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.badge-cpi {
+  background: var(--surface-elevated) !important;
+  color: var(--text-muted) !important;
+  border: 1px solid var(--border-subtle) !important;
+  border-radius: 6px;
+  padding: 2px 6px;
+  font-size: 10px;
+}
+
+/* ==========================================================================
+   Radar Currency Filters & Badges
+   ========================================================================== */
+
+.radar-filter-bar {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.badge-diamonds {
+  background: rgba(56, 189, 248, 0.12) !important;
+  color: var(--accent-blue) !important;
+  border: 1px solid rgba(56, 189, 248, 0.3) !important;
+}
+
+.badge-gold {
+  background: rgba(245, 158, 11, 0.12) !important;
+  color: #fbbf24 !important;
+  border: 1px solid rgba(245, 158, 11, 0.3) !important;
+}
+
+

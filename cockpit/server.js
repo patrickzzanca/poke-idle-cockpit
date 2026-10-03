@@ -9,7 +9,7 @@ const { createStore } = require('./store.js');
 const { createGameApi } = require('./game-api.js');
 const { Account } = require('./account.js');
 const { computeAlerts, supplies } = require('./alerts.js');
-const { scanMarket, searchDirectMarket, estimatePrice } = require('./market.js');
+const { scanMarket, searchDirectMarket, estimatePrice, fetchCommodityTickers } = require('./market.js');
 const { buildSpeciesIndex } = require('../shared/species.js');
 const { classifyCollection } = require('../shared/classifier.js');
 const { DiscordNotifier } = require('./discord.js');
@@ -329,10 +329,65 @@ function createApp({ store, api, species }) {
     }));
   }
 
+  let cachedTickers = null;
+  let lastTickerFetch = 0;
+
+  async function getCommodityTickers() {
+    const now = Date.now();
+    if (cachedTickers && now - lastTickerFetch < 30 * 1000) {
+      return { ...cachedTickers, history: store.getTickerHistory() };
+    }
+
+    const list = [...accounts.values()].filter(a => a.tokens?.accessToken);
+    if (!list.length) {
+      return cachedTickers
+        ? { ...cachedTickers, history: store.getTickerHistory() }
+        : { at: now, diamonds: {}, pheromones: {}, history: store.getTickerHistory() };
+    }
+
+    const account = list[0];
+    try {
+      const data = await account.withAuth(token => fetchCommodityTickers({
+        fetchCategory: (cat, signal) => api.marketCategory(token, cat, signal)
+      }));
+
+      cachedTickers = data;
+      lastTickerFetch = now;
+
+      // Persiste snapshot histórico a cada 15 min
+      const hist = store.getTickerHistory();
+      const lastDia = hist.diamonds[hist.diamonds.length - 1];
+      if (!lastDia || now - lastDia.at > 15 * 60 * 1000) {
+        if (data.diamonds.minPrice) {
+          store.addTickerSnapshot('diamonds', {
+            at: now,
+            min: data.diamonds.minPrice,
+            median: data.diamonds.medianPrice,
+            qty: data.diamonds.totalQty
+          });
+        }
+        if (data.pheromones.diamonds.minPrice) {
+          store.addTickerSnapshot('pheromones', {
+            at: now,
+            diaMin: data.pheromones.diamonds.minPrice,
+            goldMin: data.pheromones.gold.minPrice,
+            diaQty: data.pheromones.diamonds.totalQty
+          });
+        }
+      }
+
+      return { ...cachedTickers, history: store.getTickerHistory() };
+    } catch (err) {
+      if (cachedTickers) return { ...cachedTickers, history: store.getTickerHistory() };
+      throw err;
+    }
+  }
+
   let radarMatches = [];
   const radarSeenIds = new Set();
 
   async function checkRadar() {
+    getCommodityTickers().catch(() => {});
     const list = [...accounts.values()].filter(a => a.tokens?.accessToken);
     if (!list.length) return;
     const account = list[0];
@@ -484,6 +539,7 @@ function createApp({ store, api, species }) {
     if (req.method === 'GET' && p === '/api/market/estimate') return sendJson(res, 200, await handleEstimatePrice(url.searchParams));
     if (req.method === 'POST' && p === '/api/market/scan') return sendJson(res, 200, await startMarket(await readBody(req)));
     if (req.method === 'POST' && p === '/api/market/cancel') { market?.abort(); return sendJson(res, 200, { ok: true }); }
+    if (req.method === 'GET' && p === '/api/market/tickers') return sendJson(res, 200, await getCommodityTickers());
 
     if (req.method === 'GET' && p === '/api/radar') return sendJson(res, 200, { wishlist: store.getWishlist(), matches: radarMatches });
     if (req.method === 'POST' && p === '/api/radar/wishlist') {

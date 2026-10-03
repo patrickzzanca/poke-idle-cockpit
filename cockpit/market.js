@@ -197,7 +197,10 @@ async function searchDirectMarket({ fetchDirect, species, collection, config, pa
       }
 
       const pricePerIv = item.price && item.ivTotal ? Math.round(item.price / item.ivTotal) : null;
-      const isBargain = Boolean(medianPrice && item.price && item.price <= medianPrice * 0.75 && !item.offerOnly);
+      const bargainPct = (medianPrice && item.price && item.price < medianPrice && !item.offerOnly)
+        ? Math.round((1 - (item.price / medianPrice)) * 100)
+        : null;
+      const isBargain = Boolean(bargainPct != null && bargainPct >= 20);
 
       return {
         ...item,
@@ -206,6 +209,7 @@ async function searchDirectMarket({ fetchDirect, species, collection, config, pa
         comparison,
         pricePerIv,
         isBargain,
+        bargainPct,
         isNewSpecies: item.speciesId != null && !myBest
       };
     });
@@ -247,4 +251,77 @@ async function estimatePrice({ fetchDirect, speciesId, q, signal }) {
   };
 }
 
-module.exports = { scanMarket, searchDirectMarket, estimatePrice };
+async function fetchCommodityTickers({ fetchCategory, signal }) {
+  // 1. Diamonds (category=Diamonds)
+  const diaPayload = await fetchCategory('Diamonds', signal).catch(() => ({}));
+  const diaRaw = (diaPayload?.listings || []).filter(l => !l.offerOnly && Number(l.price) > 0);
+  const diaSorted = [...diaRaw].sort((a, b) => Number(a.price) - Number(b.price));
+  const diaTotalQty = diaSorted.reduce((sum, l) => sum + (Number(l.quantity) || 1), 0);
+  const diaPrices = diaSorted.map(l => Number(l.price));
+  const diaMinPrice = diaPrices[0] ?? null;
+  const diaMedianPrice = diaPrices.length ? diaPrices[Math.floor(diaPrices.length / 2)] : null;
+  const diaDepth = diaSorted.slice(0, 8).map(l => ({
+    price: Number(l.price),
+    qty: Number(l.quantity) || 1,
+    sellers: Number(l.sellers) || 1
+  }));
+
+  // 2. Items -> Strange Pheromone (category=Items, refId 44417 or /pheromone/i)
+  const itemsPayload = await fetchCategory('Items', signal).catch(() => ({}));
+  const itemsRaw = (itemsPayload?.listings || []).filter(l => !l.offerOnly && Number(l.price) > 0);
+  const pheroAll = itemsRaw.filter(l => l.refId === 44417 || /strange\s+pheromone|ferom/i.test(l.name));
+
+  // Pheromones in Diamonds
+  const pheroDia = pheroAll.filter(l => String(l.currency).toUpperCase() === 'DIAMONDS').sort((a, b) => Number(a.price) - Number(b.price));
+  const pheroDiaQty = pheroDia.reduce((sum, l) => sum + (Number(l.quantity) || 1), 0);
+  const pheroDiaPrices = pheroDia.map(l => Number(l.price));
+  const pheroDiaMin = pheroDiaPrices[0] ?? null;
+  const pheroDiaMedian = pheroDiaPrices.length ? pheroDiaPrices[Math.floor(pheroDiaPrices.length / 2)] : null;
+  const pheroDiaDepth = pheroDia.slice(0, 8).map(l => ({
+    price: Number(l.price),
+    qty: Number(l.quantity) || 1,
+    sellers: Number(l.sellers) || 1
+  }));
+
+  // Pheromones in Gold
+  const pheroGold = pheroAll.filter(l => String(l.currency).toUpperCase() === 'GOLD').sort((a, b) => Number(a.price) - Number(b.price));
+  const pheroGoldQty = pheroGold.reduce((sum, l) => sum + (Number(l.quantity) || 1), 0);
+  const pheroGoldPrices = pheroGold.map(l => Number(l.price));
+  const pheroGoldMin = pheroGoldPrices[0] ?? null;
+  const pheroGoldMedian = pheroGoldPrices.length ? pheroGoldPrices[Math.floor(pheroGoldPrices.length / 2)] : null;
+  const pheroGoldDepth = pheroGold.slice(0, 8).map(l => ({
+    price: Number(l.price),
+    qty: Number(l.quantity) || 1,
+    sellers: Number(l.sellers) || 1
+  }));
+
+  return {
+    at: Date.now(),
+    diamonds: {
+      minPrice: diaMinPrice,
+      medianPrice: diaMedianPrice,
+      totalQty: diaTotalQty,
+      listingsCount: diaSorted.length,
+      depth: diaDepth
+    },
+    pheromones: {
+      diamonds: {
+        minPrice: pheroDiaMin,
+        medianPrice: pheroDiaMedian,
+        totalQty: pheroDiaQty,
+        listingsCount: pheroDia.length,
+        depth: pheroDiaDepth
+      },
+      gold: {
+        minPrice: pheroGoldMin,
+        medianPrice: pheroGoldMedian,
+        totalQty: pheroGoldQty,
+        listingsCount: pheroGold.length,
+        depth: pheroGoldDepth
+      }
+    }
+  };
+}
+
+module.exports = { scanMarket, searchDirectMarket, estimatePrice, fetchCommodityTickers };
+

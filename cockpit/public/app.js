@@ -17,7 +17,8 @@ const state = {
   collection: { accountId: '', items: [], sort: 'ivTotal', dir: -1, selected: new Set(), viewMode: 'grid' },
   sell: { accountId: '', items: [], selected: new Set() },
   market: { rawResults: [], accountId: '', lastMeta: null },
-  radar: { wishlist: [], matches: [] },
+  radar: { wishlist: [], matches: [], currencyFilter: '' },
+  tickers: null,
   speciesList: []
 };
 
@@ -1037,17 +1038,23 @@ function renderMarket() {
     }
 
     const priceText = item.offerOnly ? 'Só oferta' : `${item.currency === 'DIAMONDS' ? '💎' : '$'} ${fmt(item.price)}`;
-    let badgeText = '';
-    let badgeColor = '';
-    if (item.comparison?.isUpgrade) {
-      badgeText = '🧬 Upgrade';
-      badgeColor = 'var(--accent-mint)';
-    } else if (item.isNewSpecies) {
-      badgeText = 'Novo na Bag';
-      badgeColor = 'var(--accent-blue)';
-    }
 
-    const cpiText = item.pricePerIv ? `$ ${fmt(item.pricePerIv)}/IV` : '';
+    // Suporte a múltiplos selos simultâneos (todos aparecem se aplicáveis)
+    const badges = [];
+    if (item.isBargain) {
+      const pctText = item.bargainPct ? ` -${item.bargainPct}%` : '';
+      badges.push(el('span', { class: 'market-badge mono bargain-badge' }, `🏷️ Pechincha${pctText}`));
+    }
+    if (item.comparison?.isUpgrade) {
+      const diffText = item.comparison.ivDiff > 0 ? ` (+${item.comparison.ivDiff} IV)` : '';
+      badges.push(el('span', { class: 'market-badge mono badge-upgrade' }, `🧬 Upgrade${diffText}`));
+    } else if (item.isNewSpecies) {
+      badges.push(el('span', { class: 'market-badge mono badge-new-species' }, '✨ Linha Inédita'));
+    }
+    if (item.pricePerIv) {
+      const currIcon = item.currency === 'DIAMONDS' ? '💎' : '$';
+      badges.push(el('span', { class: 'market-badge mono badge-cpi', title: 'Custo por ponto de IV' }, `${currIcon} ${fmt(item.pricePerIv)}/IV`));
+    }
 
     return el('article', { class: `market-card ${item.isBargain ? 'is-bargain' : ''}` },
       el('div', { class: 'market-header' },
@@ -1059,9 +1066,7 @@ function renderMarket() {
         ),
         el('div', { class: 'market-price-box' },
           el('div', { class: 'market-price mono' }, priceText),
-          badgeText ? el('span', { class: 'market-badge mono', style: `color:${badgeColor}` }, badgeText) : null,
-          item.isBargain ? el('span', { class: 'market-badge mono bargain-badge' }, '🏷️ Pechincha') : null,
-          cpiText ? el('span', { class: 'market-cpi mono text-xs muted', title: 'Custo por ponto de IV' }, cpiText) : null
+          el('div', { class: 'market-badges-row' }, ...badges)
         )
       ),
       splitNode
@@ -1101,6 +1106,108 @@ async function openMarketEstimate(p) {
   }
 }
 
+// ---------- Cotações de Commodities (Diamante & Feromônio) ----------
+
+async function loadCommodityTickers() {
+  try {
+    const data = await api('/api/market/tickers');
+    state.tickers = data;
+    renderCommodityTickers();
+  } catch (err) {
+    console.error('Falha ao carregar cotações:', err);
+  }
+}
+
+function renderSparklineSvg(points, field = 'min') {
+  if (!points || points.length < 2) return null;
+  const values = points.map(p => p[field]).filter(v => v != null);
+  if (values.length < 2) return null;
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = max - min || 1;
+  const w = 200;
+  const h = 32;
+  const coords = values.map((v, i) => {
+    const x = (i / (values.length - 1)) * (w - 8) + 4;
+    const y = h - 4 - ((v - min) / range) * (h - 8);
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(' ');
+
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+  svg.setAttribute('class', 'ticker-sparkline-svg');
+
+  const polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+  polyline.setAttribute('points', coords);
+  polyline.setAttribute('fill', 'none');
+  polyline.setAttribute('stroke', 'var(--accent-mint)');
+  polyline.setAttribute('stroke-width', '2');
+  polyline.setAttribute('stroke-linecap', 'round');
+  polyline.setAttribute('stroke-linejoin', 'round');
+  svg.appendChild(polyline);
+  return svg;
+}
+
+function renderDepthBars(depthItems, unit = '$', isGold = false) {
+  if (!depthItems || !depthItems.length) return el('div', { class: 'empty-chart muted text-xs' }, 'Sem ofertas ativas');
+  const maxQty = Math.max(...depthItems.map(d => d.qty), 1);
+  return el('div', { class: 'depth-bars-container' },
+    ...depthItems.map(d => {
+      const pct = Math.min(100, Math.max(14, Math.round((d.qty / maxQty) * 100)));
+      const priceStr = isGold ? (d.price >= 1000000 ? `${(d.price / 1000000).toFixed(2)}M` : `${Math.round(d.price / 1000)}k`) : `${d.price}`;
+      return el('div', { class: 'depth-bar-col', title: `${unit} ${fmt(d.price)}: ${fmt(d.qty)} un (${d.sellers} vendedor${d.sellers > 1 ? 'es' : ''})` },
+        el('div', { class: 'depth-bar-fill-wrap' },
+          el('div', { class: 'depth-bar-fill', style: `height: ${pct}%` })
+        ),
+        el('div', { class: 'depth-bar-label mono' }, priceStr),
+        el('div', { class: 'depth-bar-qty mono text-xs muted' }, `${d.qty}`)
+      );
+    })
+  );
+}
+
+function renderCommodityTickers() {
+  const t = state.tickers;
+  if (!t) return;
+
+  // 1. Diamante
+  if (t.diamonds && t.diamonds.minPrice) {
+    $('#dia-price').textContent = `$ ${fmt(t.diamonds.minPrice)}`;
+    $('#dia-sub').textContent = `Mediana $ ${fmt(t.diamonds.medianPrice)} · ${fmt(t.diamonds.totalQty)} 💎 ativos`;
+    $('#dia-stat').textContent = `${t.diamonds.listingsCount} ofertas ativas`;
+
+    const chartBox = $('#dia-chart');
+    if (chartBox) {
+      const sparkline = renderSparklineSvg(t.history?.diamonds, 'min');
+      const depthBars = renderDepthBars(t.diamonds.depth, '$', true);
+      chartBox.replaceChildren(
+        sparkline ? el('div', { class: 'sparkline-wrap' }, el('div', { class: 'sparkline-label text-xs muted mono' }, 'Histórico de Preço'), sparkline) : null,
+        el('div', { class: 'depth-wrap' }, el('div', { class: 'depth-header text-xs muted mono' }, 'Profundidade das Menores Ofertas'), depthBars)
+      );
+    }
+  }
+
+  // 2. Feromônio
+  if (t.pheromones) {
+    const diaPrice = t.pheromones.diamonds?.minPrice ? `${t.pheromones.diamonds.minPrice} 💎` : '';
+    const goldPrice = t.pheromones.gold?.minPrice ? `$ ${fmt(t.pheromones.gold.minPrice)}` : '';
+    $('#phero-price').textContent = [diaPrice, goldPrice].filter(Boolean).join(' ou ') || 'Sem ofertas';
+    const totalQty = (t.pheromones.diamonds?.totalQty || 0) + (t.pheromones.gold?.totalQty || 0);
+    $('#phero-sub').textContent = `Mediana: ${t.pheromones.diamonds?.medianPrice ? `${t.pheromones.diamonds.medianPrice} 💎` : '—'} · ${fmt(totalQty)} un no mercado`;
+    $('#phero-stat').textContent = `${t.pheromones.diamonds?.listingsCount || 0} em 💎 · ${t.pheromones.gold?.listingsCount || 0} em $`;
+
+    const chartBox = $('#phero-chart');
+    if (chartBox) {
+      const sparkline = renderSparklineSvg(t.history?.pheromones, 'diaMin');
+      const depthBars = renderDepthBars(t.pheromones.diamonds?.depth, '💎', false);
+      chartBox.replaceChildren(
+        sparkline ? el('div', { class: 'sparkline-wrap' }, el('div', { class: 'sparkline-label text-xs muted mono' }, 'Histórico em 💎'), sparkline) : null,
+        el('div', { class: 'depth-wrap' }, el('div', { class: 'depth-header text-xs muted mono' }, 'Profundidade em 💎 (Menores Preços)'), depthBars)
+      );
+    }
+  }
+}
+
 async function loadSpeciesCatalog() {
   try {
     const data = await api('/api/species');
@@ -1135,6 +1242,7 @@ function renderRadar() {
       el('div', { class: 'wishlist-item-title' },
         el('b', {}, rule.name),
         rule.speciesName ? el('span', { class: 'tag', style: '--tag:var(--accent-blue)' }, rule.speciesName) : el('span', { class: 'tag', style: '--tag:var(--text-muted)' }, 'Qualquer Poke'),
+        rule.currency ? (rule.currency === 'DIAMONDS' ? el('span', { class: 'tag', style: '--tag:var(--accent-blue)' }, '💎 Só Diamonds') : el('span', { class: 'tag', style: '--tag:var(--accent-mint)' }, '💰 Só Gold')) : el('span', { class: 'tag', style: '--tag:var(--text-muted)' }, '🌐 Gold ou 💎'),
         rule.shinyOnly ? el('span', { class: 'tag', style: '--tag:#f0b71e' }, '✨ Só Shiny') : null
       ),
       el('div', { class: 'wishlist-item-crit mono text-xs muted' },
@@ -1161,15 +1269,28 @@ function renderRadar() {
     ]));
   }
 
-  // Render matches
-  if ($('#radar-matches-badge')) $('#radar-matches-badge').textContent = `${matches.length} ${matches.length === 1 ? 'oportunidade' : 'oportunidades'}`;
-  const matchNodes = matches.map(m => {
+  // Render matches filtered by currency
+  const filteredMatches = matches.filter(m => {
+    if (state.radar.currencyFilter && m.currency !== state.radar.currencyFilter) return false;
+    return true;
+  });
+
+  if ($('#radar-matches-badge')) {
+    $('#radar-matches-badge').textContent = `${filteredMatches.length} ${filteredMatches.length === 1 ? 'oportunidade' : 'oportunidades'}`;
+  }
+
+  const matchNodes = filteredMatches.map(m => {
     let sprite = pokeStaticSpriteUrl(m.speciesId, m.shiny);
+    const currBadge = m.currency === 'DIAMONDS'
+      ? el('span', { class: 'tag', style: '--tag:var(--accent-blue)' }, '💎 Diamonds')
+      : el('span', { class: 'tag', style: '--tag:var(--accent-mint)' }, '💰 Gold');
+
     return el('div', { class: 'radar-match-card' },
       sprite ? el('img', { src: sprite, class: 'radar-match-sprite', alt: m.name }) : null,
       el('div', { class: 'radar-match-body' },
         el('div', { class: 'radar-match-top' },
           el('span', { class: 'radar-match-name bold' }, `${m.shiny ? '✨ ' : ''}${m.name}`),
+          currBadge,
           el('span', { class: 'radar-match-rule mono text-xs muted' }, `Regra: ${m.ruleName}`)
         ),
         el('div', { class: 'radar-match-stats mono text-xs' },
@@ -1272,6 +1393,7 @@ function switchTab(tab) {
   for (const section of document.querySelectorAll('.tab')) section.hidden = section.id !== `tab-${tab}`;
   if (tab === 'colecao' && $('#col-account').value !== state.collection.accountId) loadCollection();
   if (tab === 'destaques') renderHighlights();
+  if (tab === 'mercado') loadCommodityTickers();
   if (tab === 'radar') {
     $('#radar-badge')?.classList.add('hidden');
     loadRadar();
@@ -1455,6 +1577,23 @@ function bindUi() {
   $('#radar-check-now')?.addEventListener('click', checkRadarNow);
   $('#radar-clear-btn')?.addEventListener('click', clearRadar);
   $('#radar-add-form')?.addEventListener('submit', handleAddWishlistRule);
+  $('#ticker-refresh-btn')?.addEventListener('click', loadCommodityTickers);
+  $('#ticker-diamond')?.addEventListener('click', () => {
+    $('#mk-currency').value = 'DIAMONDS';
+    renderMarket();
+  });
+  $('#ticker-pheromone')?.addEventListener('click', () => {
+    $('#mk-text').value = 'Strange Pheromone';
+    fastSearchMarket();
+  });
+  for (const btn of document.querySelectorAll('#radar-currency-filters button')) {
+    btn.addEventListener('click', () => {
+      for (const b of document.querySelectorAll('#radar-currency-filters button')) b.classList.remove('active');
+      btn.classList.add('active');
+      state.radar.currencyFilter = btn.dataset.curr || '';
+      renderRadar();
+    });
+  }
   setInterval(renderAccounts, 5000);
 }
 
@@ -1466,5 +1605,8 @@ bindUi();
 connectEvents();
 loadSpeciesCatalog();
 loadRadar();
+loadCommodityTickers();
+setInterval(loadCommodityTickers, 60000);
+
 
 

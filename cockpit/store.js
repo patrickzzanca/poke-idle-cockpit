@@ -31,9 +31,13 @@ function createStore(dir) {
   }
 
   const wishlistFile = path.join(dir, 'wishlist.json');
+  const tickersFile = path.join(dir, 'tickers_history.json');
   let accounts = readJson(accountsFile, { accounts: [] }).accounts ?? [];
   let cmid = readJson(machineFile, {}).cmid ?? null;
   let wishlist = readJson(wishlistFile, { wishlist: [] }).wishlist ?? [];
+  let tickers = readJson(tickersFile, { diamonds: [], pheromones: [] });
+  if (!Array.isArray(tickers.diamonds)) tickers.diamonds = [];
+  if (!Array.isArray(tickers.pheromones)) tickers.pheromones = [];
   const raw = readJson(configFile, {});
   const config = {
     tags: { ...DEFAULT_CONFIG, ...(raw.tags || {}) },
@@ -75,6 +79,16 @@ function createStore(dir) {
     removeWishlistRule(id) {
       wishlist = wishlist.filter(w => w.id !== id);
       writeJson(wishlistFile, { wishlist });
+    },
+    getTickerHistory: () => ({
+      diamonds: [...tickers.diamonds],
+      pheromones: [...tickers.pheromones]
+    }),
+    addTickerSnapshot(type, snapshot) {
+      if (!tickers[type]) tickers[type] = [];
+      tickers[type].push(snapshot);
+      if (tickers[type].length > 60) tickers[type] = tickers[type].slice(-60);
+      writeJson(tickersFile, tickers);
     }
   };
 }

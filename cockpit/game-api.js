@@ -41,6 +41,7 @@ function createGameApi({ fetchImpl = globalThis.fetch, origin = ORIGIN } = {}) {
       const q = new URLSearchParams({ browse: 'pokemon', category: 'Pokemon', ...params });
       return request(`/api/game/market?${q.toString()}`, { token, signal });
     },
+    marketCategory: (token, category, signal) => request(`/api/game/market?category=${encodeURIComponent(category)}`, { token, signal }),
     creatures: () => request('/game/creatures.json')
   };
 }
