@@ -9,7 +9,7 @@ const { createStore } = require('./store.js');
 const { createGameApi } = require('./game-api.js');
 const { Account } = require('./account.js');
 const { computeAlerts, supplies } = require('./alerts.js');
-const { scanMarket } = require('./market.js');
+const { scanMarket, searchDirectMarket, estimatePrice } = require('./market.js');
 const { buildSpeciesIndex } = require('../shared/species.js');
 const { classifyCollection } = require('../shared/classifier.js');
 const { DiscordNotifier } = require('./discord.js');
@@ -293,6 +293,102 @@ function createApp({ store, api, species }) {
     }
   }
 
+  async function fastMarketSearch(body) {
+    let account = body.accountId ? accounts.get(body.accountId) : null;
+    if (!account) {
+      const list = [...accounts.values()].filter(a => a.tokens?.accessToken);
+      if (!list.length) throw httpError(400, 'Nenhuma conta conectada para consultar o mercado.');
+      account = list[0];
+    }
+    const params = { browse: 'pokemon', sort: body.sort || 'price-asc', page: String(body.page || 1) };
+    if (body.speciesId) params.speciesId = String(body.speciesId);
+    else if (body.q) params.q = String(body.q).trim();
+    if (body.shiny) params.shiny = '1';
+    if (body.ivMin) params.ivMin = String(body.ivMin);
+    if (body.lvMin) params.lvMin = String(body.lvMin);
+
+    return await account.withAuth(token => searchDirectMarket({
+      fetchDirect: (p, signal) => api.marketSearch(token, p, signal),
+      species,
+      collection: account.pokes ?? [],
+      config: store.config.tags,
+      params
+    }));
+  }
+
+  async function handleEstimatePrice(query) {
+    const list = [...accounts.values()].filter(a => a.tokens?.accessToken);
+    if (!list.length) throw httpError(400, 'Nenhuma conta conectada para consultar o mercado.');
+    const account = list[0];
+    const speciesId = query.get('speciesId');
+    const q = query.get('q');
+    return await account.withAuth(token => estimatePrice({
+      fetchDirect: (p, signal) => api.marketSearch(token, p, signal),
+      speciesId,
+      q
+    }));
+  }
+
+  let radarMatches = [];
+  const radarSeenIds = new Set();
+
+  async function checkRadar() {
+    const list = [...accounts.values()].filter(a => a.tokens?.accessToken);
+    if (!list.length) return;
+    const account = list[0];
+    const wishlist = store.getWishlist();
+    if (!wishlist.length) return;
+
+    let newCount = 0;
+    for (const rule of wishlist) {
+      try {
+        const params = { browse: 'pokemon', sort: 'price-asc', page: '1' };
+        if (rule.speciesId) params.speciesId = String(rule.speciesId);
+        else if (rule.speciesName) params.q = String(rule.speciesName).trim();
+        if (rule.shinyOnly) params.shiny = '1';
+        if (rule.minIv) params.ivMin = String(rule.minIv);
+
+        const res = await account.withAuth(token => api.marketSearch(token, params));
+        const rawListings = Array.isArray(res?.listings) ? res.listings : (Array.isArray(res) ? res : []);
+        for (const item of rawListings) {
+          const price = Number(item.price ?? item.totalPrice);
+          if (item.offerOnly || !price || (rule.maxPrice && price > rule.maxPrice)) continue;
+          if (rule.currency && String(item.currency).toUpperCase() !== String(rule.currency).toUpperCase()) continue;
+          const matchKey = `${rule.id}:${item.id}`;
+          if (!radarSeenIds.has(matchKey)) {
+            radarSeenIds.add(matchKey);
+            newCount++;
+            radarMatches.unshift({
+              id: matchKey,
+              ruleId: rule.id,
+              ruleName: rule.name,
+              listingId: item.id,
+              name: item.name ?? item.pokemonName ?? 'Pokémon',
+              speciesId: item.speciesId,
+              level: item.level,
+              ivTotal: item.ivTotal ?? item.iv,
+              quality: item.quality,
+              price,
+              currency: String(item.currency ?? 'GOLD').toUpperCase(),
+              shiny: Boolean(item.shiny),
+              foundAt: Date.now()
+            });
+          }
+        }
+      } catch {
+        // Ignora erro passageiro de rede
+      }
+    }
+
+    if (radarMatches.length > 50) radarMatches = radarMatches.slice(0, 50);
+    if (newCount > 0) {
+      broadcast('radar', { matches: radarMatches, newCount });
+    }
+  }
+
+  const radarInterval = setInterval(checkRadar, 5 * 60 * 1000);
+  setTimeout(checkRadar, 15000);
+
   function rememberCmid(cmid) {
     if (store.setCmid(cmid)) pushLog({ at: Date.now(), text: 'Impressão desta máquina (cmid) registrada; vale a partir da próxima conexão.' });
   }
@@ -379,8 +475,36 @@ function createApp({ store, api, species }) {
     if (req.method === 'POST' && p === '/api/accounts') {
       return sendJson(res, 200, await registerAccount(await readBody(req), { fromTab: false }));
     }
+    if (req.method === 'GET' && p === '/api/species') {
+      return sendJson(res, 200, {
+        species: species.all ? species.all().map(c => ({ pokeId: c.pokeId, name: c.name, type1: c.type1, type2: c.type2 })) : []
+      });
+    }
+    if (req.method === 'POST' && p === '/api/market/search') return sendJson(res, 200, await fastMarketSearch(await readBody(req)));
+    if (req.method === 'GET' && p === '/api/market/estimate') return sendJson(res, 200, await handleEstimatePrice(url.searchParams));
     if (req.method === 'POST' && p === '/api/market/scan') return sendJson(res, 200, await startMarket(await readBody(req)));
     if (req.method === 'POST' && p === '/api/market/cancel') { market?.abort(); return sendJson(res, 200, { ok: true }); }
+
+    if (req.method === 'GET' && p === '/api/radar') return sendJson(res, 200, { wishlist: store.getWishlist(), matches: radarMatches });
+    if (req.method === 'POST' && p === '/api/radar/wishlist') {
+      const rule = store.addWishlistRule(await readBody(req));
+      checkRadar().catch(() => {});
+      return sendJson(res, 200, { ok: true, rule });
+    }
+    if (req.method === 'DELETE' && p.startsWith('/api/radar/wishlist/')) {
+      const id = decodeURIComponent(p.replace('/api/radar/wishlist/', ''));
+      store.removeWishlistRule(id);
+      return sendJson(res, 200, { ok: true });
+    }
+    if (req.method === 'POST' && p === '/api/radar/check') {
+      await checkRadar();
+      return sendJson(res, 200, { ok: true, matches: radarMatches });
+    }
+    if (req.method === 'POST' && p === '/api/radar/clear') {
+      radarMatches = [];
+      broadcast('radar', { matches: [], newCount: 0 });
+      return sendJson(res, 200, { ok: true });
+    }
 
     const m = p.match(/^\/api\/accounts\/([^/]+)(?:\/([a-z]+))?$/);
     if (!m) throw httpError(404, 'Rota não encontrada.');

@@ -62,7 +62,7 @@
       };
     }
 
-    return { get, byName: name => byName.get(nameKey(name)) ?? null, familyOf, profile, size: byId.size };
+    return { get, byName: name => byName.get(nameKey(name)) ?? null, familyOf, profile, size: byId.size, all: () => [...byId.values()] };
   }
 
   return { buildSpeciesIndex, nameKey };

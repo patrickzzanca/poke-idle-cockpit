@@ -23,6 +23,7 @@
       <button data-tab="colecao" class="nav-pill">Coleção</button>
       <button data-tab="destaques" class="nav-pill">Destaques</button>
       <button data-tab="mercado" class="nav-pill">Mercado</button>
+      <button data-tab="radar" class="nav-pill" id="tab-pill-radar">🎯 Radar <span id="radar-badge" class="counter-badge hidden">0</span></button>
     </nav>
     <div class="top-actions">
       <div class="status-indicator">
@@ -119,25 +120,108 @@
 
     <!-- TAB 4: MERCADO -->
     <section id="tab-mercado" class="tab" hidden>
+      <datalist id="species-datalist"></datalist>
       <div class="controls hardware-card">
         <label>Comparar com <select id="mk-account"></select></label>
         <label>Tag <select id="mk-tag"><option value="all">Qualquer tag</option></select></label>
         <label>Elemento <select id="mk-element"><option value="">Todos</option></select></label>
         <label>Ordenar <select id="mk-sort"><option value="diff">Maior upgrade (+IV)</option><option value="iv">Maior IV</option><option value="quality">Maior Q</option><option value="price">Menor preço</option></select></label>
-        <label>Busca <input id="mk-text" placeholder="Nome do Pokémon"></label>
+        <label>Busca <input id="mk-text" list="species-datalist" placeholder="Nome ou selecione da lista"></label>
         <label>Min IV <input id="mk-min-iv" type="number" min="0" max="186" placeholder="0" style="width: 55px;"></label>
         <label>Min Q <input id="mk-min-q" type="number" step="0.05" min="0" placeholder="0.00" style="width: 60px;"></label>
         <label>Preço máx <input id="mk-max-price" type="number" min="0" placeholder="Máx" style="width: 80px;"></label>
         <label>Moeda <select id="mk-currency"><option value="">Todas</option><option value="GOLD">Gold ($)</option><option value="DIAMONDS">Diamonds (💎)</option></select></label>
         <label class="checkbox-label"><input type="checkbox" id="mk-shiny-only"> Apenas Shiny ✨</label>
         <label class="checkbox-label"><input type="checkbox" id="mk-hide-offers"> Ocultar só oferta</label>
-        <button id="mk-search" class="btn-hardware-action">Buscar no Mercado</button>
+        <button id="mk-fast-search" class="btn-hardware-action" title="Busca instantânea na API com os filtros">⚡ Busca Rápida</button>
+        <button id="mk-search" class="btn-hardware-subtle" title="Varre até 200 páginas do mercado para comparar com a sua coleção">🌐 Varrer Tudo</button>
         <button id="mk-cancel" class="btn-hardware-subtle" hidden>Cancelar</button>
       </div>
-      <p id="mk-status" class="muted market-status-note">Nenhuma compra é feita aqui; apenas leitura e análise de upgrades.</p>
+      <p id="mk-status" class="muted market-status-note">Dica: use a <b>⚡ Busca Rápida</b> para pesquisar qualquer espécie instantaneamente.</p>
       <div id="mk-results" class="market-grid"></div>
     </section>
+
+    <!-- TAB 5: RADAR & WISHLIST -->
+    <section id="tab-radar" class="tab" hidden>
+      <div class="radar-layout">
+        <!-- Coluna Esquerda: Cadastro de Desejos (Wishlist) -->
+        <div class="panel hardware-card radar-wishlist-panel">
+          <div class="panel-header-row">
+            <h2>📋 Minha Lista de Desejos (Wishlist)</h2>
+            <button id="radar-check-now" type="button" class="btn-hardware-subtle small" title="Forçar checagem agora">🔄 Checar Agora</button>
+          </div>
+          <p class="muted text-xs">O Cockpit verifica o mercado a cada 5 minutos. Quando encontrar uma pechincha que atenda aos seus critérios, você verá aqui!</p>
+          
+          <form id="radar-add-form" class="radar-form">
+            <div class="form-row">
+              <label>Nome da Regra <input id="wl-name" placeholder="Ex: Scyther Top ou Shiny Barato" required></label>
+            </div>
+            <div class="form-row grid-2">
+              <label>Espécie <input id="wl-species" list="species-datalist" placeholder="Qualquer Pokémon"></label>
+              <label>Moeda <select id="wl-currency"><option value="GOLD">Gold ($)</option><option value="DIAMONDS">Diamonds (💎)</option></select></label>
+            </div>
+            <div class="form-row grid-2">
+              <label>Preço Máximo <input id="wl-max-price" type="number" min="1" placeholder="Ex: 500000" required></label>
+              <label>IV Mínimo <input id="wl-min-iv" type="number" min="0" max="186" placeholder="Ex: 170"></label>
+            </div>
+            <div class="form-row flex-between" style="margin-top:6px;">
+              <label class="checkbox-label"><input type="checkbox" id="wl-shiny-only"> Apenas Shiny ✨</label>
+              <button type="submit" class="btn-hardware-action small">+ Adicionar Regra</button>
+            </div>
+          </form>
+
+          <div class="wishlist-list-header">
+            <span class="mono bold text-xs muted">DESEJOS ATIVOS</span>
+            <span id="wishlist-count" class="mono text-xs muted">0 regras</span>
+          </div>
+          <div id="wishlist-container" class="wishlist-container"></div>
+        </div>
+
+        <!-- Coluna Direita: Oportunidades Encontradas -->
+        <div class="panel hardware-card radar-matches-panel">
+          <div class="panel-header-row">
+            <div class="panel-title-with-badge">
+              <h2>⚡ Oportunidades Encontradas</h2>
+              <span id="radar-matches-badge" class="counter-badge">0 pechinchas</span>
+            </div>
+            <button id="radar-clear-btn" type="button" class="btn-hardware-subtle small" title="Limpar lista">🗑️ Limpar Vistos</button>
+          </div>
+          <div id="radar-matches-list" class="radar-matches-container"></div>
+        </div>
+      </div>
+    </section>
   </main>
+
+  <dialog id="dlg-estimate">
+    <form method="dialog" class="dlg">
+      <h2 id="est-title">💡 Avaliação de Mercado</h2>
+      <div id="est-loading" class="muted mono">Consultando mercado atual…</div>
+      <div id="est-content" hidden>
+        <div class="est-summary-grid">
+          <div class="est-metric">
+            <span class="est-label">Menor Preço Ativo</span>
+            <span id="est-min-price" class="est-val pos mono">—</span>
+          </div>
+          <div class="est-metric">
+            <span class="est-label">Preço Mediano</span>
+            <span id="est-median-price" class="est-val mono">—</span>
+          </div>
+          <div class="est-metric">
+            <span class="est-label">Total Anunciados</span>
+            <span id="est-total" class="est-val mono">—</span>
+          </div>
+        </div>
+        <div class="est-samples-header">
+          <span class="text-xs mono bold muted">ANÚNCIOS MAIS BARATOS HOJE</span>
+        </div>
+        <div id="est-samples-list" class="est-samples-list"></div>
+      </div>
+      <div class="dlg-actions">
+        <button value="cancel" class="btn-hardware-subtle">Fechar</button>
+        <button type="button" id="est-open-market" class="btn-hardware-action">Ver no Mercado ➔</button>
+      </div>
+    </form>
+  </dialog>
 
   <dialog id="dlg-add">
     <form method="dialog" class="dlg">

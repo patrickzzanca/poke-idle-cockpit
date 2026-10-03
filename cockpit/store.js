@@ -30,8 +30,10 @@ function createStore(dir) {
     fs.renameSync(tmp, file);
   }
 
+  const wishlistFile = path.join(dir, 'wishlist.json');
   let accounts = readJson(accountsFile, { accounts: [] }).accounts ?? [];
   let cmid = readJson(machineFile, {}).cmid ?? null;
+  let wishlist = readJson(wishlistFile, { wishlist: [] }).wishlist ?? [];
   const raw = readJson(configFile, {});
   const config = {
     tags: { ...DEFAULT_CONFIG, ...(raw.tags || {}) },
@@ -61,6 +63,18 @@ function createStore(dir) {
     remove(id) {
       accounts = accounts.filter(a => a.id !== id);
       writeJson(accountsFile, { accounts });
+    },
+    getWishlist: () => wishlist.map(w => ({ ...w })),
+    addWishlistRule(rule) {
+      const id = rule.id || `wl_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+      const entry = { ...rule, id };
+      wishlist.push(entry);
+      writeJson(wishlistFile, { wishlist });
+      return entry;
+    },
+    removeWishlistRule(id) {
+      wishlist = wishlist.filter(w => w.id !== id);
+      writeJson(wishlistFile, { wishlist });
     }
   };
 }

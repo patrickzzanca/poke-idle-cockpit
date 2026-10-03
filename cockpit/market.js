@@ -156,4 +156,95 @@ async function scanMarket({ fetchPage, species, collection, config, tag = 'all',
   return { results, total: scan.entries.length, pages: scan.pages, complete: scan.complete, reason: scan.reason };
 }
 
-module.exports = { scanMarket };
+async function searchDirectMarket({ fetchDirect, species, collection, config, params = {}, signal }) {
+  const payload = await fetchDirect(params, signal);
+  const rawListings = listFromPayload(payload);
+  const familyOf = species ? species.familyOf : id => id;
+  const normalizedCollection = (collection ?? []).map(normalizePoke).filter(Boolean);
+  const bestMap = bestByFamily(normalizedCollection, familyOf);
+  const classify = makeMarketClassifier(collection, { familyOf, config });
+
+  const validPrices = rawListings
+    .map(e => priceNumber(e.price ?? e.totalPrice ?? e.value))
+    .filter(p => p != null && p > 0)
+    .sort((a, b) => a - b);
+  const medianPrice = validPrices.length ? validPrices[Math.floor(validPrices.length / 2)] : null;
+  const avgPrice = validPrices.length ? Math.round(validPrices.reduce((a, b) => a + b, 0) / validPrices.length) : null;
+  const minPrice = validPrices.length ? validPrices[0] : null;
+
+  const results = rawListings.map(e => normalizeListing(e, species)).filter(Boolean)
+    .map(item => {
+      const cls = classify(normalizePoke({ ...item, id: null }));
+      const family = item.speciesId != null ? familyOf(item.speciesId) : null;
+      const myBest = family != null ? bestMap.get(family) : null;
+
+      let comparison = null;
+      if (myBest) {
+        const ivDiff = item.ivTotal - myBest.ivTotal;
+        const qualityDiff = Number((item.quality - (myBest.quality ?? 0)).toFixed(2));
+        comparison = {
+          myBest: {
+            name: myBest.name,
+            level: myBest.level,
+            ivTotal: myBest.ivTotal,
+            quality: myBest.quality,
+            shiny: myBest.shiny
+          },
+          ivDiff,
+          qualityDiff,
+          isUpgrade: ivDiff > 0 || (ivDiff === 0 && qualityDiff > 0)
+        };
+      }
+
+      const pricePerIv = item.price && item.ivTotal ? Math.round(item.price / item.ivTotal) : null;
+      const isBargain = Boolean(medianPrice && item.price && item.price <= medianPrice * 0.75 && !item.offerOnly);
+
+      return {
+        ...item,
+        ...cls,
+        family,
+        comparison,
+        pricePerIv,
+        isBargain,
+        isNewSpecies: item.speciesId != null && !myBest
+      };
+    });
+
+  return {
+    results,
+    total: payload?.total ?? results.length,
+    pages: payload?.pages ?? 1,
+    stats: { minPrice, avgPrice, medianPrice, total: payload?.total ?? results.length }
+  };
+}
+
+async function estimatePrice({ fetchDirect, speciesId, q, signal }) {
+  const params = { browse: 'pokemon', sort: 'price-asc', page: '1' };
+  if (speciesId) params.speciesId = String(speciesId);
+  else if (q) params.q = String(q).trim();
+  const payload = await fetchDirect(params, signal);
+  const rawListings = listFromPayload(payload);
+  const validPrices = rawListings
+    .map(e => priceNumber(e.price ?? e.totalPrice ?? e.value))
+    .filter(p => p != null && p > 0)
+    .sort((a, b) => a - b);
+  const minPrice = validPrices.length ? validPrices[0] : null;
+  const avgPrice = validPrices.length ? Math.round(validPrices.reduce((a, b) => a + b, 0) / validPrices.length) : null;
+  const medianPrice = validPrices.length ? validPrices[Math.floor(validPrices.length / 2)] : null;
+  const sample = rawListings.slice(0, 5).map(e => ({
+    name: e.name ?? e.pokemonName ?? 'Pokémon',
+    level: num(e.level),
+    ivTotal: num(e.ivTotal ?? e.iv),
+    quality: num(e.quality),
+    price: priceNumber(e.price ?? e.totalPrice),
+    currency: String(e.currency ?? 'GOLD').toUpperCase(),
+    shiny: Boolean(e.shiny)
+  }));
+  return {
+    total: payload?.total ?? rawListings.length,
+    minPrice, avgPrice, medianPrice,
+    sample
+  };
+}
+
+module.exports = { scanMarket, searchDirectMarket, estimatePrice };

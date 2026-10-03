@@ -16,7 +16,9 @@ const state = {
   accounts: new Map(), highlights: [], shinies: [], logs: [], warnings: [], config: null, tab: 'contas',
   collection: { accountId: '', items: [], sort: 'ivTotal', dir: -1, selected: new Set(), viewMode: 'grid' },
   sell: { accountId: '', items: [], selected: new Set() },
-  market: { rawResults: [], accountId: '', lastMeta: null }
+  market: { rawResults: [], accountId: '', lastMeta: null },
+  radar: { wishlist: [], matches: [] },
+  speciesList: []
 };
 
 const $ = sel => document.querySelector(sel);
@@ -193,6 +195,27 @@ function playShinyKillSound() {
     osc.start(start);
     osc.stop(start + dur + 0.02);
   });
+}
+
+function playRadarChime() {
+  if (!soundEnabled) return;
+  const ctx = getAudioContext();
+  if (!ctx) return;
+  try {
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(523.25, now);
+    osc.frequency.exponentialRampToValueAtTime(659.25, now + 0.12);
+    gain.gain.setValueAtTime(0.001, now);
+    gain.gain.linearRampToValueAtTime(0.2, now + 0.04);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + 0.36);
+  } catch {}
 }
 
 
@@ -688,6 +711,13 @@ function renderCollection() {
       el('div', { class: 'card-stats mono' }, `IV ${fmt(p.ivTotal)} · Q ${p.quality != null ? p.quality.toFixed(2) : '—'}`),
       el('div', { class: 'card-foot' },
         typeBadges(p.profile?.types),
+        el('button', {
+          type: 'button',
+          class: 'btn-hardware-subtle mini',
+          style: 'padding: 2px 6px; font-size: 10px; margin-left: auto;',
+          title: 'Ver preço médio no mercado',
+          onclick: (e) => { e.stopPropagation(); openMarketEstimate(p); }
+        }, '💡 Mercado'),
         p.sellValue != null ? el('span', { class: 'muted mono' }, `$ ${fmt(p.sellValue)}`) : null
       )
     );
@@ -820,6 +850,57 @@ function renderHighlights() {
 }
 
 // ---------- Mercado ----------
+
+async function fastSearchMarket() {
+  const accountId = $('#mk-account').value;
+  if (!accountId) return alert('Adicione uma conta primeiro: o mercado é comparado com a sua coleção.');
+  const query = $('#mk-text').value.trim();
+  const minIv = Number($('#mk-min-iv').value) || 0;
+  const shiny = $('#mk-shiny-only').checked;
+  const sort = $('#mk-sort').value === 'price' ? 'price-asc' : ($('#mk-sort').value === 'iv' ? 'iv-desc' : 'price-asc');
+
+  let speciesId = null;
+  if (query) {
+    const sp = state.speciesList?.find(s => s.name.toLowerCase() === query.toLowerCase());
+    if (sp) speciesId = sp.pokeId;
+  }
+
+  $('#mk-fast-search').disabled = true;
+  $('#mk-status').textContent = 'Buscando na API do jogo…';
+  $('#mk-results').replaceChildren();
+
+  try {
+    const data = await api('/api/market/search', {
+      method: 'POST',
+      body: {
+        accountId,
+        speciesId,
+        q: speciesId ? undefined : (query || undefined),
+        shiny,
+        ivMin: minIv > 0 ? minIv : undefined,
+        sort
+      }
+    });
+
+    state.market.rawResults = data.results || [];
+    state.market.accountId = accountId;
+    state.market.lastMeta = {
+      total: data.total,
+      pages: data.pages,
+      complete: true,
+      stats: data.stats
+    };
+    renderMarket();
+    if (data.stats && data.stats.total > 0) {
+      const s = data.stats;
+      $('#mk-status').innerHTML = `<b>${fmt(data.total)}</b> anúncios encontrados · Menor: <span class="mono pos">$ ${fmt(s.minPrice)}</span> · Média: <span class="mono">$ ${fmt(s.avgPrice)}</span> · Mediana: <span class="mono">$ ${fmt(s.medianPrice)}</span>`;
+    }
+  } catch (error) {
+    $('#mk-status').textContent = error.message;
+  } finally {
+    $('#mk-fast-search').disabled = false;
+  }
+}
 
 async function searchMarket() {
   const accountId = $('#mk-account').value;
@@ -959,14 +1040,16 @@ function renderMarket() {
     let badgeText = '';
     let badgeColor = '';
     if (item.comparison?.isUpgrade) {
-      badgeText = 'Upgrade';
+      badgeText = '🧬 Upgrade';
       badgeColor = 'var(--accent-mint)';
     } else if (item.isNewSpecies) {
       badgeText = 'Novo na Bag';
       badgeColor = 'var(--accent-blue)';
     }
 
-    return el('article', { class: 'market-card' },
+    const cpiText = item.pricePerIv ? `$ ${fmt(item.pricePerIv)}/IV` : '';
+
+    return el('article', { class: `market-card ${item.isBargain ? 'is-bargain' : ''}` },
       el('div', { class: 'market-header' },
         spriteNode,
         el('div', { class: 'market-title' },
@@ -976,12 +1059,205 @@ function renderMarket() {
         ),
         el('div', { class: 'market-price-box' },
           el('div', { class: 'market-price mono' }, priceText),
-          badgeText ? el('span', { class: 'market-badge mono', style: `color:${badgeColor}` }, badgeText) : null
+          badgeText ? el('span', { class: 'market-badge mono', style: `color:${badgeColor}` }, badgeText) : null,
+          item.isBargain ? el('span', { class: 'market-badge mono bargain-badge' }, '🏷️ Pechincha') : null,
+          cpiText ? el('span', { class: 'market-cpi mono text-xs muted', title: 'Custo por ponto de IV' }, cpiText) : null
         )
       ),
       splitNode
     );
   }));
+}
+
+async function openMarketEstimate(p) {
+  const dlg = $('#dlg-estimate');
+  $('#est-title').textContent = `💡 Mercado — ${p.shiny ? '✨ ' : ''}${p.name}`;
+  $('#est-loading').hidden = false;
+  $('#est-content').hidden = true;
+  $('#est-open-market').onclick = () => {
+    dlg.close();
+    switchTab('mercado');
+    $('#mk-text').value = p.name;
+    fastSearchMarket();
+  };
+  dlg.showModal();
+
+  try {
+    const data = await api(`/api/market/estimate?speciesId=${p.speciesId || ''}&q=${encodeURIComponent(p.name)}`);
+    $('#est-loading').hidden = true;
+    $('#est-content').hidden = false;
+    $('#est-min-price').textContent = data.minPrice ? `$ ${fmt(data.minPrice)}` : 'Nenhum ativo';
+    $('#est-median-price').textContent = data.medianPrice ? `$ ${fmt(data.medianPrice)}` : '—';
+    $('#est-total').textContent = `${fmt(data.total)} anúncios`;
+
+    const samplesList = (data.sample || []).map(s => el('div', { class: 'est-sample-row mono text-xs' },
+      el('span', { class: 'bold' }, `${s.shiny ? '✨ ' : ''}${s.name}`),
+      el('span', { class: 'muted' }, `IV ${s.ivTotal} · Q ${s.quality ? s.quality.toFixed(2) : '—'}`),
+      el('span', { class: 'pos bold' }, `${s.currency === 'DIAMONDS' ? '💎' : '$'} ${fmt(s.price)}`)
+    ));
+    $('#est-samples-list').replaceChildren(...(samplesList.length ? samplesList : [el('div', { class: 'muted text-xs' }, 'Sem anúncios ativos para esta espécie.')]));
+  } catch (err) {
+    $('#est-loading').textContent = `Erro ao consultar mercado: ${err.message}`;
+  }
+}
+
+async function loadSpeciesCatalog() {
+  try {
+    const data = await api('/api/species');
+    state.speciesList = data.species || [];
+    const dl = $('#species-datalist');
+    if (dl && state.speciesList.length) {
+      dl.replaceChildren(...state.speciesList.map(s => el('option', { value: s.name })));
+    }
+  } catch {}
+}
+
+// ---------- Radar & Wishlist ----------
+
+async function loadRadar() {
+  try {
+    const data = await api('/api/radar');
+    state.radar.wishlist = data.wishlist || [];
+    state.radar.matches = data.matches || [];
+    renderRadar();
+  } catch (err) {
+    console.error('Falha ao carregar radar:', err);
+  }
+}
+
+function renderRadar() {
+  const { wishlist, matches } = state.radar;
+  if ($('#wishlist-count')) $('#wishlist-count').textContent = `${wishlist.length} ${wishlist.length === 1 ? 'regra' : 'regras'}`;
+
+  // Render wishlist rules
+  const ruleNodes = wishlist.map(rule => el('div', { class: 'wishlist-item-card' },
+    el('div', { class: 'wishlist-item-main' },
+      el('div', { class: 'wishlist-item-title' },
+        el('b', {}, rule.name),
+        rule.speciesName ? el('span', { class: 'tag', style: '--tag:var(--accent-blue)' }, rule.speciesName) : el('span', { class: 'tag', style: '--tag:var(--text-muted)' }, 'Qualquer Poke'),
+        rule.shinyOnly ? el('span', { class: 'tag', style: '--tag:#f0b71e' }, '✨ Só Shiny') : null
+      ),
+      el('div', { class: 'wishlist-item-crit mono text-xs muted' },
+        rule.minIv ? `IV ≥ ${rule.minIv} · ` : '',
+        `Teto: ${rule.currency === 'DIAMONDS' ? '💎' : '$'} ${fmt(rule.maxPrice)}`
+      )
+    ),
+    el('button', {
+      type: 'button',
+      class: 'btn-icon-subtle',
+      title: 'Remover regra',
+      onclick: async () => {
+        if (!confirm(`Remover regra "${rule.name}"?`)) return;
+        await api(`/api/radar/wishlist/${rule.id}`, { method: 'DELETE' });
+        loadRadar();
+      }
+    }, '✕')
+  ));
+
+  const wlContainer = $('#wishlist-container');
+  if (wlContainer) {
+    wlContainer.replaceChildren(...(ruleNodes.length ? ruleNodes : [
+      el('div', { class: 'empty-subtle text-xs' }, 'Nenhum desejo cadastrado. Crie um acima para ser alertado quando alguém anunciar!')
+    ]));
+  }
+
+  // Render matches
+  if ($('#radar-matches-badge')) $('#radar-matches-badge').textContent = `${matches.length} ${matches.length === 1 ? 'oportunidade' : 'oportunidades'}`;
+  const matchNodes = matches.map(m => {
+    let sprite = pokeStaticSpriteUrl(m.speciesId, m.shiny);
+    return el('div', { class: 'radar-match-card' },
+      sprite ? el('img', { src: sprite, class: 'radar-match-sprite', alt: m.name }) : null,
+      el('div', { class: 'radar-match-body' },
+        el('div', { class: 'radar-match-top' },
+          el('span', { class: 'radar-match-name bold' }, `${m.shiny ? '✨ ' : ''}${m.name}`),
+          el('span', { class: 'radar-match-rule mono text-xs muted' }, `Regra: ${m.ruleName}`)
+        ),
+        el('div', { class: 'radar-match-stats mono text-xs' },
+          el('span', {}, `IV ${m.ivTotal}`),
+          el('span', { class: 'muted' }, `Q ${m.quality ? m.quality.toFixed(2) : '—'}`),
+          el('span', { class: 'pos bold' }, `${m.currency === 'DIAMONDS' ? '💎' : '$'} ${fmt(m.price)}`)
+        )
+      ),
+      el('button', {
+        type: 'button',
+        class: 'btn-hardware-subtle small',
+        title: 'Ver no Mercado',
+        onclick: () => {
+          switchTab('mercado');
+          $('#mk-text').value = m.name.replace(/\s+Lv\.\d+/i, '').replace(/^✨\s*/, '').replace(/^Shiny\s+/i, '').trim();
+          fastSearchMarket();
+        }
+      }, 'Ver no Mercado ➔')
+    );
+  });
+
+  const matchesContainer = $('#radar-matches-list');
+  if (matchesContainer) {
+    matchesContainer.replaceChildren(...(matchNodes.length ? matchNodes : [
+      el('div', { class: 'empty-subtle text-xs' }, 'Nenhuma oportunidade encontrada no momento. O radar checa a cada 5 minutos.')
+    ]));
+  }
+}
+
+async function checkRadarNow() {
+  const btn = $('#radar-check-now');
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = '🔄 Checando…';
+  }
+  try {
+    const res = await api('/api/radar/check', { method: 'POST' });
+    state.radar.matches = res.matches || [];
+    renderRadar();
+  } catch (err) {
+    alert(`Erro ao checar radar: ${err.message}`);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = '🔄 Checar Agora';
+    }
+  }
+}
+
+async function clearRadar() {
+  try {
+    await api('/api/radar/clear', { method: 'POST' });
+    state.radar.matches = [];
+    renderRadar();
+  } catch (err) {
+    alert(`Erro ao limpar radar: ${err.message}`);
+  }
+}
+
+async function handleAddWishlistRule(e) {
+  e.preventDefault();
+  const name = $('#wl-name').value.trim();
+  const speciesName = $('#wl-species').value.trim();
+  const currency = $('#wl-currency').value;
+  const maxPrice = Number($('#wl-max-price').value);
+  const minIv = $('#wl-min-iv').value ? Number($('#wl-min-iv').value) : undefined;
+  const shinyOnly = $('#wl-shiny-only').checked;
+
+  let speciesId;
+  if (speciesName && state.speciesList?.length) {
+    const found = state.speciesList.find(s => s.name.toLowerCase() === speciesName.toLowerCase());
+    if (found) speciesId = found.pokeId || found.id;
+  }
+
+  try {
+    await api('/api/radar/wishlist', {
+      method: 'POST',
+      body: { name, speciesId, speciesName, currency, maxPrice, minIv, shinyOnly }
+    });
+    $('#wl-name').value = '';
+    $('#wl-species').value = '';
+    $('#wl-max-price').value = '';
+    $('#wl-min-iv').value = '';
+    $('#wl-shiny-only').checked = false;
+    await loadRadar();
+  } catch (err) {
+    alert(`Erro ao salvar regra: ${err.message}`);
+  }
 }
 
 // ---------- Geral ----------
@@ -996,6 +1272,10 @@ function switchTab(tab) {
   for (const section of document.querySelectorAll('.tab')) section.hidden = section.id !== `tab-${tab}`;
   if (tab === 'colecao' && $('#col-account').value !== state.collection.accountId) loadCollection();
   if (tab === 'destaques') renderHighlights();
+  if (tab === 'radar') {
+    $('#radar-badge')?.classList.add('hidden');
+    loadRadar();
+  }
 }
 
 function fillStaticSelects() {
@@ -1041,6 +1321,19 @@ function connectEvents() {
   source.addEventListener('market-progress', e => {
     const { page, count } = JSON.parse(e.data);
     $('#mk-status').textContent = `Página ${page}: ${fmt(count)} anúncios recebidos…`;
+  });
+  source.addEventListener('radar', e => {
+    const data = JSON.parse(e.data);
+    state.radar.matches = data.matches || [];
+    renderRadar();
+    if (data.newCount > 0) {
+      const badge = $('#radar-badge');
+      if (badge) {
+        badge.textContent = data.newCount;
+        badge.classList.remove('hidden');
+      }
+      playRadarChime();
+    }
   });
 }
 
@@ -1153,11 +1446,15 @@ function bindUi() {
   $('#theme-btn-dark')?.addEventListener('click', () => applyTheme('dark'));
   $('#theme-btn-light')?.addEventListener('click', () => applyTheme('light'));
   $('#theme-toggle')?.addEventListener('click', () => applyTheme(document.body.classList.contains('light-mode') ? 'dark' : 'light'));
+  $('#mk-fast-search')?.addEventListener('click', fastSearchMarket);
   $('#mk-search').addEventListener('click', searchMarket);
   $('#mk-cancel').addEventListener('click', () => act('/api/market/cancel'));
   for (const id of ['#mk-tag', '#mk-element', '#mk-sort', '#mk-currency']) $(id).addEventListener('change', renderMarket);
   for (const id of ['#mk-shiny-only', '#mk-hide-offers']) $(id).addEventListener('change', renderMarket);
   for (const id of ['#mk-text', '#mk-min-iv', '#mk-min-q', '#mk-max-price']) $(id).addEventListener('input', renderMarket);
+  $('#radar-check-now')?.addEventListener('click', checkRadarNow);
+  $('#radar-clear-btn')?.addEventListener('click', clearRadar);
+  $('#radar-add-form')?.addEventListener('submit', handleAddWishlistRule);
   setInterval(renderAccounts, 5000);
 }
 
@@ -1167,4 +1464,7 @@ setupAudioUnlock();
 fillStaticSelects();
 bindUi();
 connectEvents();
+loadSpeciesCatalog();
+loadRadar();
+
 

@@ -37,6 +37,10 @@ function createGameApi({ fetchImpl = globalThis.fetch, origin = ORIGIN } = {}) {
     sell: (token, pokeIds) => request('/api/game/pokemon/sell', { method: 'POST', token, body: { pokeIds } }),
     lock: (token, id, locked) => request('/api/game/pokemon/lock', { method: 'POST', token, body: { id, locked } }),
     market: (token, page, signal) => request(`/api/game/market?category=Pokemon${page != null ? `&page=${page}` : ''}`, { token, signal }),
+    marketSearch: (token, params = {}, signal) => {
+      const q = new URLSearchParams({ browse: 'pokemon', category: 'Pokemon', ...params });
+      return request(`/api/game/market?${q.toString()}`, { token, signal });
+    },
     creatures: () => request('/game/creatures.json')
   };
 }
