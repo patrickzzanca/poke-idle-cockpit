@@ -24,16 +24,20 @@ class RouteRunner {
       originalHuntName: null,
       targetCapturesPerSpecies: 1,
       maxTimePerHuntSec: 300,
+      maxTimeWithoutKillSec: 60,
       returnHome: true,
       currentIndex: 0,
       currentCaptures: 0,
+      currentHuntKills: 0,
       currentHuntStartedAt: null,
+      lastKillInHuntAt: null,
       queue: [],
       history: []
     };
 
     this.timer = null;
     this.onCaptureBound = this.handleCapture.bind(this);
+    this.onKillBound = this.handleKill.bind(this);
     this.onFieldNoneBound = this.handleFieldNone.bind(this);
     this.onGameErrorBound = this.handleGameError.bind(this);
   }
@@ -54,7 +58,7 @@ class RouteRunner {
     };
   }
 
-  start({ queue, route, targetCaptures, targetPerPoke, maxTimeSec, timeoutSec, returnHome = true }) {
+  start({ queue, route, targetCaptures, targetPerPoke, maxTimeSec, timeoutSec, noKillTimeoutSec, maxTimeWithoutKillSec, returnHome = true }) {
     const list = Array.isArray(queue) && queue.length ? queue : (Array.isArray(route) ? route : []);
     if (!list.length) {
       throw new Error('A rota precisa ter pelo menos 1 Pokémon.');
@@ -64,6 +68,9 @@ class RouteRunner {
     const origSlug = this.account.lastHunt || this.account.state.hunt || 'caterpie';
     const origName = this.account.state.hunt || origSlug;
 
+    const rawNoKill = noKillTimeoutSec !== undefined ? noKillTimeoutSec : maxTimeWithoutKillSec;
+    const resolvedNoKill = rawNoKill !== undefined ? Math.max(0, Number(rawNoKill) || 0) : 60;
+
     this.state.running = true;
     this.state.paused = false;
     this.state.startedAt = Date.now();
@@ -71,6 +78,7 @@ class RouteRunner {
     this.state.originalHuntName = origName;
     this.state.targetCapturesPerSpecies = Math.max(1, Number(targetCaptures ?? targetPerPoke) || 1);
     this.state.maxTimePerHuntSec = Math.max(60, Number(maxTimeSec ?? timeoutSec) || 300);
+    this.state.maxTimeWithoutKillSec = resolvedNoKill;
     this.state.returnHome = Boolean(returnHome);
     this.state.queue = list.map((q, idx) => ({
       index: idx,
@@ -85,9 +93,12 @@ class RouteRunner {
     }));
     this.state.currentIndex = 0;
     this.state.currentCaptures = 0;
+    this.state.currentHuntKills = 0;
+    this.state.lastKillInHuntAt = null;
     this.state.history = [];
 
     this.account.on('capture', this.onCaptureBound);
+    this.account.on('kill', this.onKillBound);
     this.account.on('field-none', this.onFieldNoneBound);
     this.account.on('game-error', this.onGameErrorBound);
 
@@ -130,6 +141,7 @@ class RouteRunner {
     this.state.running = false;
     this.state.paused = false;
     this.account.off('capture', this.onCaptureBound);
+    this.account.off('kill', this.onKillBound);
     this.account.off('field-none', this.onFieldNoneBound);
     this.account.off('game-error', this.onGameErrorBound);
     clearInterval(this.timer);
@@ -156,7 +168,9 @@ class RouteRunner {
 
     target.status = 'hunting';
     this.state.currentCaptures = 0;
+    this.state.currentHuntKills = 0;
     this.state.currentHuntStartedAt = Date.now();
+    this.state.lastKillInHuntAt = Date.now();
 
     this.log(`🧭 [${this.state.currentIndex + 1}/${this.state.queue.length}] Indo caçar: ${target.name} (Nv ${target.level}) [hunt: ${target.slug}]…`);
     this.account.setHunt(target.slug, target.name);
@@ -164,8 +178,16 @@ class RouteRunner {
     this.emitStatus();
   }
 
+  handleKill(message) {
+    if (!this.state.running || this.state.paused) return;
+    this.state.currentHuntKills++;
+    this.state.lastKillInHuntAt = Date.now();
+  }
+
   handleCapture({ at, poke }) {
     if (!this.state.running || this.state.paused) return;
+    this.state.currentHuntKills++;
+    this.state.lastKillInHuntAt = Date.now();
     const target = this.getCurrentTarget();
     if (!target) return;
 
@@ -236,6 +258,7 @@ class RouteRunner {
     this.state.running = false;
     this.state.paused = false;
     this.account.off('capture', this.onCaptureBound);
+    this.account.off('kill', this.onKillBound);
     this.account.off('field-none', this.onFieldNoneBound);
     this.account.off('game-error', this.onGameErrorBound);
     clearInterval(this.timer);
@@ -260,13 +283,30 @@ class RouteRunner {
       const target = this.getCurrentTarget();
       if (!target) return;
 
-      const elapsedSec = Math.round((Date.now() - (this.state.currentHuntStartedAt || Date.now())) / 1000);
+      const now = Date.now();
+
+      // Watchdog 1: Se não houver kill em X segundos (padrão: 60s / 1 min)
+      if (this.state.maxTimeWithoutKillSec > 0) {
+        const timeWithoutKill = Math.round((now - (this.state.lastKillInHuntAt || this.state.currentHuntStartedAt || now)) / 1000);
+        if (timeWithoutKill >= this.state.maxTimeWithoutKillSec) {
+          const tempoDesc = this.state.maxTimeWithoutKillSec >= 60
+            ? `${Math.round(this.state.maxTimeWithoutKillSec / 60)} min`
+            : `${this.state.maxTimeWithoutKillSec}s`;
+          this.log(`⚠️ Nenhuma kill em ${tempoDesc} na hunt de ${target.name}. Pulando para o próximo alvo…`);
+          target.status = 'skipped';
+          this.advanceNext();
+          return;
+        }
+      }
+
+      // Watchdog 2: Tempo máximo total por hunt (ex: 3, 5 ou 10 min)
+      const elapsedSec = Math.round((now - (this.state.currentHuntStartedAt || now)) / 1000);
       if (elapsedSec > this.state.maxTimePerHuntSec) {
         this.log(`⚠️ Tempo limite de ${Math.round(this.state.maxTimePerHuntSec / 60)} min atingido em ${target.name}. Avançando para o próximo alvo…`);
         target.status = 'skipped';
         this.advanceNext();
       }
-    }, 4000);
+    }, 2000);
   }
 
   log(text) {
@@ -285,6 +325,56 @@ class RouteRunner {
   }
 }
 
+// Os 46 Pokémon desbloqueados para caça confirmados na Pokédex:
+const UNLOCKED_SPECIES_IDS = new Set([
+  16,  // Pidgey (Lv 1)
+  43,  // Oddish (Lv 1)
+  46,  // Paras (Lv 1)
+  69,  // Bellsprout (Lv 1)
+  50,  // Diglett (Lv 10)
+  81,  // Magnemite (Lv 10)
+  102, // Exeggcute (Lv 10)
+  109, // Koffing (Lv 10)
+  1,   // Bulbasaur (Lv 20)
+  37,  // Vulpix (Lv 20)
+  92,  // Gastly (Lv 20)
+  138, // Omanyte (Lv 20)
+  228, // Houndour (Lv 20)
+  30,  // Nidorina (Lv 30)
+  147, // Dratini (Lv 30)
+  216, // Teddiursa (Lv 30)
+  238, // Smoochum (Lv 30)
+  24,  // Arbok (Lv 40)
+  47,  // Parasect (Lv 50)
+  93,  // Haunter (Lv 50)
+  193, // Yanma (Lv 50)
+  106, // Hitmonlee (Lv 60)
+  128, // Tauros (Lv 60)
+  237, // Hitmontop (Lv 60)
+  3,   // Venusaur (Lv 80)
+  6,   // Charizard (Lv 80)
+  40,  // Wigglytuff (Lv 80)
+  76,  // Golem (Lv 80)
+  82,  // Magneton (Lv 80)
+  89,  // Muk (Lv 80)
+  148, // Dragonair (Lv 80)
+  157, // Typhlosion (Lv 80)
+  160, // Feraligatr (Lv 80)
+  241, // Miltank (Lv 80)
+  65,  // Alakazam (Lv 100)
+  94,  // Gengar (Lv 100)
+  123, // Scyther (Lv 100)
+  124, // Jynx (Lv 100)
+  125, // Electabuzz (Lv 100)
+  126, // Magmar (Lv 100)
+  127, // Pinsir (Lv 100)
+  130, // Gyarados (Lv 100)
+  212, // Scizor (Lv 100)
+  214, // Heracross (Lv 100)
+  217, // Ursaring (Lv 100)
+  226  // Mantine (Lv 100)
+]);
+
 function buildPresetRoutes(allCreatures, ownedSpeciesSet = new Set()) {
   const creatures = Array.isArray(allCreatures) ? allCreatures : [];
 
@@ -302,52 +392,16 @@ function buildPresetRoutes(allCreatures, ownedSpeciesSet = new Set()) {
   // Presets
   const presets = [
     {
-      id: 'unowned_kanto',
-      title: '👑 Kanto: Não Capturados (Até Lv 499)',
-      description: 'Apenas Pokémon da região de Kanto (Gen 1, #1 a #151) até nível 499 que você ainda NÃO TEM na coleção (100% com hunt garantida).',
-      filter: c => c.pokeId >= 1 && c.pokeId <= 151 && c.huntLevel != null && c.huntLevel <= 499 && !c.area && !ownedSpeciesSet.has(c.pokeId)
+      id: 'unowned_final',
+      title: '🎯 Pokédex: Faltantes (46 Desbloqueados)',
+      description: 'Rota contendo apenas os Pokémon desbloqueados para caça que ainda faltam registrar na sua Pokédex.',
+      filter: c => UNLOCKED_SPECIES_IDS.has(c.pokeId) && !ownedSpeciesSet.has(c.pokeId)
     },
     {
-      id: 'unowned_kanto_30',
-      title: '🌱 Kanto Speedrun: Não Capturados (Lv 1 a 30)',
-      description: 'Pokémon de Kanto até nível 30 que faltam na sua Pokédex (iniciais e monstros fáceis).',
-      filter: c => c.pokeId >= 1 && c.pokeId <= 151 && c.huntLevel != null && c.huntLevel <= 30 && !c.area && !ownedSpeciesSet.has(c.pokeId)
-    },
-    {
-      id: 'unowned_kanto_80',
-      title: '⚡ Kanto Intermediário: Não Capturados (Lv 1 a 80)',
-      description: 'Pokémon de Kanto até nível 80 que faltam na sua coleção.',
-      filter: c => c.pokeId >= 1 && c.pokeId <= 151 && c.huntLevel != null && c.huntLevel <= 80 && !c.area && !ownedSpeciesSet.has(c.pokeId)
-    },
-    {
-      id: 'unowned_lvl499',
-      title: '🌐 Global: Todos Não Capturados (Até Lv 499)',
-      description: 'Todas as regiões combinadas até nível 499 que você ainda NÃO TEM na coleção.',
-      filter: c => c.huntLevel != null && c.huntLevel <= 499 && !c.area && !ownedSpeciesSet.has(c.pokeId)
-    },
-    {
-      id: 'kanto_lvl1',
-      title: '🌱 Fase 1: Iniciais de Kanto (Lv 1)',
-      description: 'Monstros de nível 1 com 100% de taxa de captura imediata.',
-      filter: c => c.huntLevel === 1 && !c.area
-    },
-    {
-      id: 'kanto_lvl10',
-      title: '⚡ Fase 2: Cavernas e Rotas (Lv 10)',
-      description: 'Monstros de nível 10 para expandir tipos elementais (Zubat, Diglett, Mankey, Abra…).',
-      filter: c => c.huntLevel === 10 && !c.area
-    },
-    {
-      id: 'starters_lvl20',
-      title: '🔥 Fase 3: Iniciais & Eevee (Lv 20)',
-      description: 'Iniciais de Kanto/Johto/Hoenn, Eevee, Machop, Vulpix, Houndour e raros de Lv 20.',
-      filter: c => c.huntLevel === 20 && !c.area
-    },
-    {
-      id: 'dragons_lvl30',
-      title: '🐉 Fase 4: Dragões & Semilendários (Lv 20-30)',
-      description: 'Dratini, Larvitar, Beldum, Gible, Riolu, Goomy e outros de grande valor.',
-      filter: c => [147, 246, 374, 443, 447, 704, 371].includes(c.pokeId)
+      id: 'all_unlocked',
+      title: '🗺️ Rota Completa (46 Desbloqueados)',
+      description: 'Rota contendo todos os 46 Pokémon desbloqueados para caça no jogo, ordenados por nível.',
+      filter: c => UNLOCKED_SPECIES_IDS.has(c.pokeId)
     }
   ];
 

@@ -357,6 +357,7 @@ class Account extends EventEmitter {
         break;
       case 'field-kill':
         this.setState({ lastKillAt: Date.now(), leaderFainted: false });
+        this.emit('kill', message);
         if (Array.isArray(message.loot) && message.loot.length > 0) {
           if (this.inventory) {
             for (const l of message.loot) {

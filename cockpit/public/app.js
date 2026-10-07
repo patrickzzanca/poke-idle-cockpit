@@ -1860,8 +1860,9 @@ async function loadRouteData(force = false) {
 
     if (statusData && statusData.running) {
       state.route.queue = statusData.queue || [];
-    } else if ((!state.route.queue.length || force) && state.route.presets.length > 0) {
-      const defaultPreset = state.route.presets.find(p => p.id === 'unowned_kanto') || state.route.presets.find(p => p.id === 'unowned_lvl499') || state.route.presets[0];
+      const defaultPreset = (state.route.presets.find(p => p.id === 'unowned_final' && p.count > 0))
+        || state.route.presets.find(p => p.id === 'all_unlocked')
+        || state.route.presets[0];
       if (defaultPreset) {
         selectRoutePreset(defaultPreset.id);
       }
@@ -2117,6 +2118,7 @@ async function startAutoRoute() {
 
   const targetPerPoke = Number($('#route-target-captures').value) || 1;
   const timeoutSec = Number($('#route-max-time').value) || 300;
+  const noKillTimeoutSec = Number($('#route-no-kill-timeout')?.value ?? 60);
   const returnToHome = $('#route-return-home').checked;
 
   try {
@@ -2129,6 +2131,8 @@ async function startAutoRoute() {
         targetPerPoke,
         maxTimeSec: timeoutSec,
         timeoutSec,
+        noKillTimeoutSec,
+        maxTimeWithoutKillSec: noKillTimeoutSec,
         returnHome: returnToHome
       }
     });
