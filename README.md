@@ -11,7 +11,7 @@ Painel de controle local e automação *headless* 24/7 para **[Poke Idle World](
 - **🧭 Rota Automática & Expedição de Capturas:**
   - Sequenciador inteligente que movimenta a conta entre diferentes hunts automaticamente.
   - Escuta em tempo real eventos de captura via WebSocket (`account.on('capture')`) e avança para a próxima hunt no milissegundo em que a meta for batida.
-  - **6 Presets Dinâmicos:** Iniciais Kanto (Lv 1), Cavernas (Lv 10), Iniciais & Eevee (Lv 20), Dragões & Semilendários (Lv 20-30), Speedrun Pokédex (Lv 1-20 não capturados) e Pokédex Master (Lv 1-30).
+  - **Presets Dinâmicos:** 👑 Não Capturados até Lv 499 (Expedição Completa), ✨ Speedrun (Lv 1-20), 🚀 Pokédex Master (Lv 1-30), ⚡ Avançado (Lv 1-100), Iniciais Kanto (Lv 1), Cavernas (Lv 10), Iniciais & Eevee (Lv 20) e Dragões (Lv 20-30).
   - Watchdog de tempo máximo por hunt (3, 5 ou 10 min) e retorno automático à hunt base ao terminar ou pausar.
 - **🎒 Bag / Inventário & Mercado de Itens:**
   - Visualização completa da Bag (Doces, Pedras, Essências, Pokébolas e Loots).

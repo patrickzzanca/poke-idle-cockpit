@@ -1861,7 +1861,7 @@ async function loadRouteData(force = false) {
     if (statusData && statusData.running) {
       state.route.queue = statusData.queue || [];
     } else if ((!state.route.queue.length || force) && state.route.presets.length > 0) {
-      const defaultPreset = state.route.presets.find(p => p.id === 'unowned_lvl20') || state.route.presets[0];
+      const defaultPreset = state.route.presets.find(p => p.id === 'unowned_lvl499') || state.route.presets.find(p => p.id === 'unowned_lvl20') || state.route.presets[0];
       if (defaultPreset) {
         selectRoutePreset(defaultPreset.id);
       }

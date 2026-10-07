@@ -271,6 +271,30 @@ function buildPresetRoutes(allCreatures, ownedSpeciesSet = new Set()) {
   // Presets
   const presets = [
     {
+      id: 'unowned_lvl499',
+      title: '👑 Não Capturados (Até Lv 499)',
+      description: 'Todos os Pokémon disponíveis até nível 499 que você ainda NÃO TEM na coleção (ordem crescente de nível).',
+      filter: c => c.huntLevel != null && c.huntLevel <= 499 && !c.area && !ownedSpeciesSet.has(c.pokeId)
+    },
+    {
+      id: 'unowned_lvl20',
+      title: '✨ Speedrun: Não Capturados (Lv 1 a 20)',
+      description: 'Todos os Pokémon até nível 20 que você AINDA NÃO TEM na coleção.',
+      filter: c => c.huntLevel != null && c.huntLevel <= 20 && !c.area && !ownedSpeciesSet.has(c.pokeId)
+    },
+    {
+      id: 'unowned_lvl30',
+      title: '🚀 Pokédex Master: Não Capturados (Lv 1 a 30)',
+      description: 'Todos os Pokémon até nível 30 que faltam na sua Pokédex, ordenados por nível.',
+      filter: c => c.huntLevel != null && c.huntLevel <= 30 && !c.area && !ownedSpeciesSet.has(c.pokeId)
+    },
+    {
+      id: 'unowned_lvl100',
+      title: '⚡ Avançado: Não Capturados (Lv 1 a 100)',
+      description: 'Todos os Pokémon até nível 100 que faltam na sua Pokédex, ordenados por nível.',
+      filter: c => c.huntLevel != null && c.huntLevel <= 100 && !c.area && !ownedSpeciesSet.has(c.pokeId)
+    },
+    {
       id: 'kanto_lvl1',
       title: '🌱 Fase 1: Iniciais de Kanto (Lv 1)',
       description: 'Monstros de nível 1 com 100% de taxa de captura imediata.',
@@ -293,18 +317,6 @@ function buildPresetRoutes(allCreatures, ownedSpeciesSet = new Set()) {
       title: '🐉 Fase 4: Dragões & Semilendários (Lv 20-30)',
       description: 'Dratini, Larvitar, Beldum, Gible, Riolu, Goomy e outros de grande valor.',
       filter: c => [147, 246, 374, 443, 447, 704, 371].includes(c.pokeId)
-    },
-    {
-      id: 'unowned_lvl20',
-      title: '✨ Pokédex Speedrun: Não Capturados (Lv 1 a 20)',
-      description: 'Todos os Pokémon até nível 20 que você AINDA NÃO TEM na coleção.',
-      filter: c => c.huntLevel != null && c.huntLevel <= 20 && !c.area && !ownedSpeciesSet.has(c.pokeId)
-    },
-    {
-      id: 'unowned_lvl30',
-      title: '🚀 Pokédex Master: Todos Não Capturados (Lv 1 a 30)',
-      description: 'Todos os Pokémon até nível 30 que faltam na sua Pokédex, ordenados por nível.',
-      filter: c => c.huntLevel != null && c.huntLevel <= 30 && !c.area && !ownedSpeciesSet.has(c.pokeId)
     }
   ];
 
