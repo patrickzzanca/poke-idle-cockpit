@@ -2,6 +2,8 @@ cockpit/accounts.json
 cockpit/accounts.json.*
 cockpit/config.json
 cockpit/machine.json
+cockpit/wishlist.json
+cockpit/tickers_history.json
 cockpit/.cache/
 editado.js
 script-original.js

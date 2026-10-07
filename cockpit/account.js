@@ -48,6 +48,8 @@ class Account extends EventEmitter {
     this.lastMessageAt = 0;
     this.pingSentAt = 0;
     this.pokes = null;
+    this.inventory = null; // [{ itemId, quantity }] da mensagem 'inventory'
+    this.balls = null;     // { catalog, counts } da mensagem 'balls'
     this.state = {
       status: 'offline', error: null, offlineSince: Date.now(),
       gold: null, diamonds: null, trainer: { name: record.name, level: null },
@@ -171,7 +173,7 @@ class Account extends EventEmitter {
       this.pingSentAt = 0;
       this.setState({ status: 'online', error: null, offlineSince: null, connectedAt: Date.now() });
       this.log('Conectada.');
-      for (const type of ['pokes-get', 'autohelper-get', 'balls-get', 'analyzer-get']) this.send({ type });
+      for (const type of ['pokes-get', 'autohelper-get', 'balls-get', 'analyzer-get', 'inv-get']) this.send({ type });
       // Aguarda hunt-resume do servidor para respeitar a hunt iniciada no navegador.
       // Se após 3s o servidor não enviar hunt-resume nem field-init, usa a última hunt conhecida.
       clearTimeout(this.timers.huntFallback);
@@ -185,6 +187,8 @@ class Account extends EventEmitter {
       this.timers.analyzer = setInterval(() => this.send({ type: 'analyzer-get' }), 30000);
       this.timers.status = setInterval(() => {
         this.send({ type: 'autohelper-get' });
+        this.send({ type: 'inv-get' });
+        this.send({ type: 'balls-get' });
         this.loadCharacter().catch(() => {});
         this.refreshIfOld();
       }, 60000);
@@ -353,6 +357,20 @@ class Account extends EventEmitter {
         break;
       case 'field-kill':
         this.setState({ lastKillAt: Date.now(), leaderFainted: false });
+        if (Array.isArray(message.loot) && message.loot.length > 0) {
+          if (this.inventory) {
+            for (const l of message.loot) {
+              if (!l.itemId) continue;
+              const existing = this.inventory.find(it => it.itemId === l.itemId);
+              if (existing) {
+                existing.quantity = (existing.quantity || 0) + (l.qty || 1);
+              } else {
+                this.inventory.push({ itemId: l.itemId, quantity: l.qty || 1 });
+              }
+            }
+            this.emit('inventory', this.inventory);
+          }
+        }
         if (message.shiny) {
           this.emit('shiny-encounter', {
             type: 'kill',
@@ -383,6 +401,14 @@ class Account extends EventEmitter {
       }
       case 'trade-settled':
         this.send({ type: 'pokes-get' });
+        break;
+      case 'inventory':
+        this.inventory = Array.isArray(message.items) ? message.items : [];
+        this.emit('inventory', this.inventory);
+        break;
+      case 'balls':
+        this.balls = { catalog: Array.isArray(message.catalog) ? message.catalog : [], counts: message.counts ?? {} };
+        this.emit('balls', this.balls);
         break;
     }
   }
@@ -462,6 +488,58 @@ class Account extends EventEmitter {
       this.pokes = this.pokes.map(p => p?.id === id ? { ...p, locked } : p);
       this.emit('pokes', this.pokes);
     }
+  }
+
+  // Mesmo payload do botão "Anunciar" do cliente oficial.
+  async listItem({ kind, refId, quantity, price, currency }) {
+    return this.withAuth(token => this.api.marketAction(token, { action: 'sell', kind, refId, quantity, price, currency }));
+  }
+
+  refreshBag() {
+    this.send({ type: 'inv-get' });
+    this.send({ type: 'balls-get' });
+  }
+
+  async fetchBag(timeoutMs = 1500) {
+    if (this.socket?.readyState !== 1) { // 1 === WebSocket.OPEN
+      return { inventory: this.inventory || [], balls: this.balls || { catalog: [], counts: {} } };
+    }
+
+    return new Promise(resolve => {
+      let done = false;
+      let gotInv = false;
+      let gotBalls = false;
+
+      const finish = () => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        this.off('inventory', onInv);
+        this.off('balls', onBalls);
+        resolve({
+          inventory: this.inventory || [],
+          balls: this.balls || { catalog: [], counts: {} }
+        });
+      };
+
+      const timer = setTimeout(finish, timeoutMs);
+
+      const onInv = () => {
+        gotInv = true;
+        if (gotBalls) finish();
+      };
+
+      const onBalls = () => {
+        gotBalls = true;
+        if (gotInv) finish();
+      };
+
+      this.once('inventory', onInv);
+      this.once('balls', onBalls);
+
+      this.send({ type: 'inv-get' });
+      this.send({ type: 'balls-get' });
+    });
   }
 }
 

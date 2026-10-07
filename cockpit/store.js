@@ -5,6 +5,7 @@ const path = require('node:path');
 const { DEFAULT_CONFIG } = require('../shared/classifier.js');
 
 const DEFAULT_ALERTS = { boxRatio: 0.9, ballsMin: 100, potionsMin: 20, offlineMinutes: 2 };
+const DEFAULT_HIGHLIGHT = { minQuality: 1.7, minIv: 130 };
 const MAX_ACCOUNTS = 4;
 
 function createStore(dir) {
@@ -41,7 +42,8 @@ function createStore(dir) {
   const raw = readJson(configFile, {});
   const config = {
     tags: { ...DEFAULT_CONFIG, ...(raw.tags || {}) },
-    alerts: { ...DEFAULT_ALERTS, ...(raw.alerts || {}) }
+    alerts: { ...DEFAULT_ALERTS, ...(raw.alerts || {}) },
+    highlight: { ...DEFAULT_HIGHLIGHT, ...(raw.highlight || {}) }
   };
 
   return {

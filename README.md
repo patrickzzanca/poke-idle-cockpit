@@ -8,9 +8,22 @@ Painel de controle local e automação *headless* 24/7 para **[Poke Idle World](
 
 - **🪶 Ultraleve e Headless:** Conecta-se diretamente à API e WebSockets do jogo. Dispensa navegador aberto, consumindo menos de 40 MB de memória RAM e quase 0% de CPU.
 - **👥 Múltiplas Contas (até 4):** Acompanhe o progresso de várias contas simultaneamente no mesmo painel.
+- **🧭 Rota Automática & Expedição de Capturas:**
+  - Sequenciador inteligente que movimenta a conta entre diferentes hunts automaticamente.
+  - Escuta em tempo real eventos de captura via WebSocket (`account.on('capture')`) e avança para a próxima hunt no milissegundo em que a meta for batida.
+  - **6 Presets Dinâmicos:** Iniciais Kanto (Lv 1), Cavernas (Lv 10), Iniciais & Eevee (Lv 20), Dragões & Semilendários (Lv 20-30), Speedrun Pokédex (Lv 1-20 não capturados) e Pokédex Master (Lv 1-30).
+  - Watchdog de tempo máximo por hunt (3, 5 ou 10 min) e retorno automático à hunt base ao terminar ou pausar.
+- **🎒 Bag / Inventário & Mercado de Itens:**
+  - Visualização completa da Bag (Doces, Pedras, Essências, Pokébolas e Loots).
+  - **⚡ Venda Rápida:** Anúncio em lote com 1 clique calculando automaticamente $1 a menos que o menor preço ativo concorrente (respeitando o piso mínimo do NPC).
+  - **🏷️ Precificação Manual:** Modal com cotações em tempo real de Gold e Diamantes (Menor preço, Mediana, Média e Volume de oferta) e botões de atalho (Undercut, Igualar Mínimo, Mediana).
+  - Gestão e cancelamento instantâneo de anúncios próprios ativos.
+- **🎯 Radar & Wishlist de Mercado:**
+  - Varredura em tempo real dos anúncios de Pokémon com filtros por Espécie, Shiny, Qualidade mínima, IV mínimo e teto de preço.
+  - Tickers em tempo real de commodities do jogo (Diamantes e Strange Pheromone).
+  - Alertas sonoros (Web Audio API) no navegador.
 - **🔔 Notificações no Discord:**
-  - ✨ **Shinies capturados:** Card temático dourado com sprite oficial do Pokémon via PokéAPI.
-  - ⭐ **Pokémons Raros / Top IV:** Destaques automáticos baseados na qualidade e potencial genético.
+  - ⭐ **Destaques e Capturas de Alto Valor:** Notificações filtradas para Pokémons com Qualidade ≥ 1.70 e IV Total ≥ 130.
   - ⚠️ **Alertas de Suprimentos:** Avisa quando as Pokébolas de auto-captura acabarem ou quando a Box atingir 90% da capacidade.
 - **⏳ Estimativas Inteligentes:**
   - Cálculo dinâmico do tempo até esgotar as Pokébolas ativas (ex: `esgota em ~8h 20m`).
@@ -19,7 +32,6 @@ Painel de controle local e automação *headless* 24/7 para **[Poke Idle World](
   - Filtros por Tag, Tipo e Busca textual.
   - Seleção em lote com um clique pós-filtragem (`Selecionar tudo` / `Desmarcar`).
   - Proteção estrita contra venda acidental de pokémons do time ativo, shinies, raros ou com cadeado 🔒.
-- **🏪 Scanner de Mercado:** Varredura em tempo real dos anúncios de venda de pokémons.
 
 ---
 

@@ -18,6 +18,8 @@ const state = {
   sell: { accountId: '', items: [], selected: new Set() },
   market: { rawResults: [], accountId: '', lastMeta: null },
   radar: { wishlist: [], matches: [], currencyFilter: '' },
+  bag: { accountId: '', items: [], selected: new Set(), categoryFilter: '', search: '', marketSummary: {}, myListings: [], activeItem: null },
+  route: { accountId: '', presets: [], activePresetId: null, queue: [], status: null },
   tickers: null,
   speciesList: []
 };
@@ -531,8 +533,9 @@ function renderSessionShinies() {
 }
 
 function refreshAccountSelects() {
-  for (const [sel, allowAll] of [['#col-account', false], ['#hl-account', true], ['#mk-account', false]]) {
+  for (const [sel, allowAll] of [['#col-account', false], ['#hl-account', true], ['#mk-account', false], ['#bag-account', false], ['#route-account', false]]) {
     const select = $(sel);
+    if (!select) continue;
     const current = select.value;
     const options = [...state.accounts.values()].map(a => el('option', { value: a.id }, a.trainer?.name ?? a.name));
     select.replaceChildren(...(allowAll ? [el('option', { value: '' }, 'Todas')] : []), ...options);
@@ -1446,6 +1449,740 @@ async function handleAddWishlistRule(e) {
   }
 }
 
+// ---------- Bag & Venda de Itens ----------
+
+const CATEGORY_NAMES = {
+  loot: 'Loot',
+  heal: 'Poção / Cura',
+  evolution: 'Pedra Evolutiva',
+  stone: 'Pedra Evolutiva',
+  stones: 'Pedra Evolutiva',
+  held: 'Equipável',
+  equipment: 'Equipável',
+  ball: 'Pokébola',
+  craft: 'Crafting',
+  boost: 'Boost',
+  item: 'Geral'
+};
+
+async function loadBag(fresh = false) {
+  const accountId = $('#bag-account')?.value || [...state.accounts.keys()][0] || '';
+  if (!accountId) {
+    state.bag.items = [];
+    renderBag();
+    return;
+  }
+  state.bag.accountId = accountId;
+  const countEl = $('#bag-count');
+  if (countEl && !state.bag.items.length) {
+    countEl.textContent = 'Carregando inventário e mercado…';
+  }
+
+  const refreshBtn = $('#bag-refresh-btn');
+  if (fresh && refreshBtn) {
+    refreshBtn.disabled = true;
+    refreshBtn.textContent = '⏳ Atualizando…';
+  }
+
+  try {
+    const [bagData, marketData] = await Promise.all([
+      api(`/api/accounts/${accountId}/bag${fresh ? '?fresh=1' : ''}`),
+      api(`/api/market/items-summary?accountId=${accountId}`).catch(() => ({ summary: {}, mine: [] }))
+    ]);
+
+    state.bag.items = Array.isArray(bagData?.items) ? bagData.items : [];
+    state.bag.marketSummary = marketData?.summary || {};
+    state.bag.myListings = Array.isArray(marketData?.mine) ? marketData.mine : [];
+    renderBag();
+    renderBagMyListings();
+  } catch (err) {
+    if (countEl) countEl.textContent = `Erro: ${err.message}`;
+  } finally {
+    if (refreshBtn) {
+      refreshBtn.disabled = false;
+      refreshBtn.textContent = '🔄 Atualizar Bag';
+    }
+  }
+}
+
+function bagFilteredItems() {
+  const cat = state.bag.categoryFilter;
+  const search = (state.bag.search || '').toLowerCase().trim();
+  const cats = cat ? cat.split(',').map(c => c.trim()) : [];
+
+  return state.bag.items.filter(item => {
+    if (cats.length && !cats.includes(item.category)) return false;
+    if (search && !item.name.toLowerCase().includes(search)) return false;
+    return true;
+  });
+}
+
+function renderBag() {
+  const items = bagFilteredItems();
+  const summary = state.bag.marketSummary || {};
+  const selected = state.bag.selected;
+
+  $('#bag-count').textContent = `${items.length} de ${state.bag.items.length} itens na bag`;
+
+  const cards = items.map(item => {
+    const isSelected = selected.has(item.key);
+    const mkt = summary[item.key];
+    const iconUrl = item.icon || '/assets/markitems/pokeball.png';
+
+    const card = el('article', {
+      class: `bag-item-card ${isSelected ? 'selected' : ''}`,
+      onclick: (e) => {
+        if (e.target.tagName === 'INPUT' || e.target.closest('input')) return;
+        openItemPricingModal(item);
+      }
+    },
+      el('input', {
+        type: 'checkbox',
+        checked: isSelected,
+        onclick: (e) => e.stopPropagation(),
+        onchange: (e) => {
+          if (e.target.checked) selected.add(item.key);
+          else selected.delete(item.key);
+          card.classList.toggle('selected', e.target.checked);
+          updateBagDock();
+        }
+      }),
+      el('div', { class: 'bag-item-icon-wrap' },
+        el('img', {
+          src: iconUrl,
+          alt: item.name,
+          onerror: (e) => { e.target.style.display = 'none'; }
+        })
+      ),
+      el('div', { class: 'bag-item-info' },
+        el('div', { class: 'bag-item-name', title: item.name }, item.name),
+        el('div', { class: 'bag-item-meta' },
+          el('span', { class: 'tag' }, CATEGORY_NAMES[item.category] || item.category),
+          el('b', { class: 'mono pos' }, `x${fmt(item.quantity)}`),
+          item.npcPrice ? el('span', { class: 'muted mono', title: 'Preço fixo de compra pelo NPC' }, `Piso: $ ${fmt(item.npcPrice)}`) : null
+        ),
+        el('div', { class: 'bag-item-prices-row mono' },
+          mkt?.minGold != null
+            ? el('span', { class: 'price-pill-gold', title: `Mediana: $ ${fmt(mkt.medianGold)} · Total à venda: ${fmt(mkt.totalGoldQty)}` }, `Mín: $ ${fmt(mkt.minGold)}`)
+            : el('span', { class: 'muted text-xs' }, 'Sem ofertas $'),
+          mkt?.minDia != null
+            ? el('span', { class: 'price-pill-dia', title: `Mediana: 💎 ${fmt(mkt.medianDia)} · Total à venda: ${fmt(mkt.totalDiaQty)}` }, `💎 ${fmt(mkt.minDia)}`)
+            : null
+        )
+      )
+    );
+
+    return card;
+  });
+
+  const container = $('#bag-grid');
+  if (container) {
+    container.replaceChildren(...(cards.length ? cards : [
+      el('div', { class: 'empty', style: 'grid-column: 1/-1' }, 'Nenhum item encontrado na bag desta conta.')
+    ]));
+  }
+
+  updateBagDock();
+}
+
+function updateBagDock() {
+  const dock = $('#bag-floating-dock');
+  if (!dock) return;
+  const selected = state.bag.selected;
+  if (!selected.size) {
+    dock.classList.add('hidden');
+    return;
+  }
+  dock.classList.remove('hidden');
+
+  const summary = state.bag.marketSummary || {};
+  let totalEstGold = 0;
+
+  for (const item of state.bag.items) {
+    if (!selected.has(item.key)) continue;
+    const mkt = summary[item.key];
+    const npcFloor = item.npcPrice || 1;
+    let unitPrice = 0;
+    if (mkt?.minGold && mkt.minGold > 1) {
+      unitPrice = Math.max(npcFloor, mkt.minGold - 1);
+    } else {
+      unitPrice = Math.max(1, npcFloor * 2);
+    }
+    totalEstGold += unitPrice * item.quantity;
+  }
+
+  $('#bag-dock-text').textContent = `${selected.size} itens marcados · Estimativa: $ ${fmt(totalEstGold)}`;
+}
+
+async function executeQuickSell() {
+  const selected = state.bag.selected;
+  if (!selected.size) return;
+  const accountId = state.bag.accountId;
+  if (!accountId) return;
+
+  const itemsToSell = [];
+  for (const item of state.bag.items) {
+    if (selected.has(item.key)) {
+      itemsToSell.push({
+        kind: item.kind,
+        refId: item.refId,
+        quantity: item.quantity,
+        currency: 'GOLD'
+      });
+    }
+  }
+
+  if (!confirm(`Confirmar Venda Rápida de ${itemsToSell.length} tipos de itens pelo MENOR PREÇO do mercado (- $1)?`)) return;
+
+  const btn = $('#bag-dock-quicksell');
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = '⏳ Anunciando no mercado…';
+  }
+
+  try {
+    const res = await api('/api/market/quick-sell', {
+      method: 'POST',
+      body: { accountId, items: itemsToSell }
+    });
+
+    const success = res.results.filter(r => r.success);
+    const failed = res.results.filter(r => !r.success);
+
+    let msg = `✅ ${success.length} itens anunciados com sucesso no mercado!`;
+    if (failed.length) {
+      msg += `\n⚠️ ${failed.length} falharam: ` + failed.map(f => `${f.name}: ${f.error}`).join('; ');
+    }
+    alert(msg);
+
+    state.bag.selected.clear();
+    await loadBag();
+  } catch (err) {
+    alert(`Erro na venda rápida: ${err.message}`);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = '⚡ Venda Rápida (Menor Preço - $1)';
+    }
+  }
+}
+
+function renderBagMyListings() {
+  const listings = state.bag.myListings || [];
+  $('#bag-my-listings-count').textContent = `${listings.length} ativos`;
+
+  const cards = listings.map(l => {
+    const isDia = l.currency === 'DIAMONDS';
+    return el('div', { class: 'my-listing-card' },
+      el('div', { class: 'my-listing-left' },
+        el('div', { class: 'my-listing-info' },
+          el('div', { class: 'my-listing-name' }, l.name),
+          el('div', { class: 'mono text-xs' },
+            `Qtd: `, el('b', {}, fmt(l.quantity)), ` · `,
+            el('span', { class: isDia ? 'price-pill-dia' : 'price-pill-gold' }, `${isDia ? '💎' : '$'} ${fmt(l.price)}/un`)
+          )
+        )
+      ),
+      el('button', {
+        type: 'button',
+        class: 'btn-hardware-subtle small',
+        title: 'Cancelar anúncio e devolver itens para a bag',
+        onclick: async () => {
+          if (!confirm(`Cancelar anúncio de ${l.name}?`)) return;
+          try {
+            await api('/api/market/cancel-item', {
+              method: 'POST',
+              body: { accountId: state.bag.accountId, listingId: l.id }
+            });
+            await loadBag();
+          } catch (err) {
+            alert(`Erro ao cancelar: ${err.message}`);
+          }
+        }
+      }, '✕ Cancelar')
+    );
+  });
+
+  $('#bag-my-listings-list').replaceChildren(...(cards.length ? cards : [
+    el('div', { class: 'empty', style: 'grid-column: 1/-1' }, 'Você não tem nenhum anúncio de item ativo no mercado.')
+  ]));
+}
+
+function openItemPricingModal(item) {
+  state.bag.activeItem = item;
+  const summary = state.bag.marketSummary || {};
+  const mkt = summary[item.key] || {};
+
+  $('#item-pricing-name').textContent = item.name;
+  $('#item-pricing-cat').textContent = CATEGORY_NAMES[item.category] || item.category;
+  $('#item-pricing-owned').textContent = `Na bag: ${fmt(item.quantity)}`;
+  $('#item-pricing-npc').textContent = item.npcPrice ? `Piso NPC: $ ${fmt(item.npcPrice)}` : 'Piso NPC: —';
+
+  const iconWrap = $('#item-pricing-icon');
+  iconWrap.replaceChildren(el('img', { src: item.icon || '/assets/markitems/pokeball.png', alt: item.name }));
+
+  // Gold quotes
+  $('#quote-gold-min').textContent = mkt.minGold != null ? `$ ${fmt(mkt.minGold)}` : '—';
+  $('#quote-gold-med').textContent = mkt.medianGold != null ? `$ ${fmt(mkt.medianGold)}` : '—';
+  $('#quote-gold-qty').textContent = mkt.totalGoldQty != null ? fmt(mkt.totalGoldQty) : '0';
+
+  const goldDepthContainer = $('#quote-gold-depth');
+  if (mkt.goldDepth?.length) {
+    goldDepthContainer.replaceChildren(...mkt.goldDepth.map(d => el('div', { class: 'depth-row mono' },
+      el('span', {}, `$ ${fmt(d.price)}`),
+      el('span', { class: 'muted' }, `x${fmt(d.qty)} (${d.sellers} sel)`)
+    )));
+  } else {
+    goldDepthContainer.replaceChildren(el('div', { class: 'muted text-xs' }, 'Nenhum anúncio em Gold'));
+  }
+
+  // Diamonds quotes
+  $('#quote-dia-min').textContent = mkt.minDia != null ? `💎 ${fmt(mkt.minDia)}` : '—';
+  $('#quote-dia-med').textContent = mkt.medianDia != null ? `💎 ${fmt(mkt.medianDia)}` : '—';
+  $('#quote-dia-qty').textContent = mkt.totalDiaQty != null ? fmt(mkt.totalDiaQty) : '0';
+
+  const diaDepthContainer = $('#quote-dia-depth');
+  if (mkt.diaDepth?.length) {
+    diaDepthContainer.replaceChildren(...mkt.diaDepth.map(d => el('div', { class: 'depth-row mono' },
+      el('span', {}, `💎 ${fmt(d.price)}`),
+      el('span', { class: 'muted' }, `x${fmt(d.qty)} (${d.sellers} sel)`)
+    )));
+  } else {
+    diaDepthContainer.replaceChildren(el('div', { class: 'muted text-xs' }, 'Nenhum anúncio em 💎'));
+  }
+
+  // Form initialization
+  const qtyInput = $('#item-pricing-qty');
+  qtyInput.max = item.quantity;
+  qtyInput.value = item.quantity;
+
+  const currSelect = $('#item-pricing-currency');
+  currSelect.value = 'GOLD';
+
+  const priceInput = $('#item-pricing-unit-price');
+  const npcFloor = item.npcPrice || 1;
+  let defaultPrice = 1;
+  if (mkt.minGold && mkt.minGold > 1) {
+    defaultPrice = Math.max(npcFloor, mkt.minGold - 1);
+  } else if (mkt.minGold === 1) {
+    defaultPrice = 1;
+  } else {
+    defaultPrice = Math.max(1, npcFloor * 2);
+  }
+  priceInput.value = defaultPrice;
+
+  $('#item-pricing-error').textContent = '';
+  updateItemPricingTotals();
+
+  $('#dlg-item-pricing').showModal();
+}
+
+function updateItemPricingTotals() {
+  const item = state.bag.activeItem;
+  if (!item) return;
+
+  const qty = Math.max(1, Math.min(item.quantity, Number($('#item-pricing-qty').value) || 1));
+  const price = Math.max(1, Number($('#item-pricing-unit-price').value) || 1);
+  const currency = $('#item-pricing-currency').value;
+
+  const gross = qty * price;
+  const isDia = currency === 'DIAMONDS';
+  const fee = isDia ? 0 : Math.min(1000000, Math.floor(gross * 0.03));
+  const net = isDia ? gross : gross - fee;
+
+  $('#item-pricing-total-rev').textContent = `${isDia ? '💎' : '$'} ${fmt(net)} (bruto: ${isDia ? '💎' : '$'} ${fmt(gross)})`;
+  $('#item-pricing-fee').textContent = isDia ? 'Isento em Diamantes (0%)' : `$ ${fmt(fee)} (3%)`;
+}
+
+async function submitItemListing() {
+  const item = state.bag.activeItem;
+  if (!item) return;
+  const accountId = state.bag.accountId;
+  if (!accountId) return;
+
+  const qty = Math.max(1, Math.min(item.quantity, Number($('#item-pricing-qty').value) || 1));
+  const price = Math.max(1, Number($('#item-pricing-unit-price').value) || 1);
+  const currency = $('#item-pricing-currency').value;
+
+  if (currency === 'GOLD' && item.npcPrice && price < item.npcPrice) {
+    $('#item-pricing-error').textContent = `O preço não pode ser menor que o piso do NPC ($ ${fmt(item.npcPrice)}).`;
+    return;
+  }
+
+  const btn = $('#item-pricing-submit');
+  btn.disabled = true;
+  btn.textContent = '⏳ Criando Anúncio…';
+  $('#item-pricing-error').textContent = '';
+
+  try {
+    const res = await api('/api/market/sell-item', {
+      method: 'POST',
+      body: {
+        accountId,
+        kind: item.kind,
+        refId: item.refId,
+        quantity: qty,
+        price,
+        currency
+      }
+    });
+
+    if (res.results?.[0]?.success) {
+      $('#dlg-item-pricing').close();
+      await loadBag();
+    } else {
+      $('#item-pricing-error').textContent = res.results?.[0]?.error || 'Erro ao criar anúncio.';
+    }
+  } catch (err) {
+    $('#item-pricing-error').textContent = err.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '📢 Criar Anúncio';
+  }
+}
+
+// ---------- Rota Automática ----------
+
+async function loadRouteData(force = false) {
+  const accountSelect = $('#route-account');
+  const accountId = accountSelect?.value || state.route.accountId || [...state.accounts.keys()][0] || '';
+  if (!accountId) return;
+  state.route.accountId = accountId;
+
+  try {
+    const [presetsData, statusData] = await Promise.all([
+      api(`/api/routes/presets?accountId=${encodeURIComponent(accountId)}`),
+      api(`/api/accounts/${encodeURIComponent(accountId)}/route`)
+    ]);
+
+    state.route.presets = presetsData.presets || [];
+    state.route.status = statusData || null;
+
+    if (statusData && statusData.running) {
+      state.route.queue = statusData.queue || [];
+    } else if ((!state.route.queue.length || force) && state.route.presets.length > 0) {
+      const defaultPreset = state.route.presets.find(p => p.id === 'unowned_lvl20') || state.route.presets[0];
+      if (defaultPreset) {
+        selectRoutePreset(defaultPreset.id);
+      }
+    }
+
+    renderRoutePresets();
+    renderRouteDashboard();
+    renderRouteQueue();
+    updateRouteBadge();
+  } catch (err) {
+    console.error('Erro ao carregar rota automática:', err);
+  }
+}
+
+function selectRoutePreset(presetId) {
+  const preset = state.route.presets.find(p => p.id === presetId);
+  if (!preset) return;
+  state.route.activePresetId = presetId;
+  const list = preset.items || preset.route || [];
+  state.route.queue = JSON.parse(JSON.stringify(list));
+  renderRoutePresets();
+  renderRouteQueue();
+}
+
+function renderRoutePresets() {
+  const container = $('#route-preset-chips');
+  if (!container) return;
+
+  const chips = state.route.presets.map(p => {
+    const isSelected = state.route.activePresetId === p.id;
+    const isRunning = Boolean(state.route.status && state.route.status.running);
+    const label = p.title || p.name || p.id;
+    return el('button', {
+      type: 'button',
+      class: `preset-chip ${isSelected ? 'active' : ''}`,
+      title: p.description,
+      disabled: isRunning,
+      onclick: () => selectRoutePreset(p.id)
+    },
+      label,
+      el('span', { class: 'chip-badge' }, `${p.count}`)
+    );
+  });
+
+  container.replaceChildren(...chips);
+}
+
+function renderRouteDashboard() {
+  const st = state.route.status;
+  const isRunning = Boolean(st && st.running && !st.paused);
+  const isPaused = Boolean(st && st.running && st.paused);
+  const hasActiveSession = isRunning || isPaused;
+
+  const btnStart = $('#route-btn-start');
+  const btnPause = $('#route-btn-pause');
+  const btnResume = $('#route-btn-resume');
+  const btnSkip = $('#route-btn-skip');
+  const btnStop = $('#route-btn-stop');
+
+  if (btnStart) btnStart.hidden = hasActiveSession;
+  if (btnPause) btnPause.hidden = !isRunning;
+  if (btnResume) btnResume.hidden = !isPaused;
+  if (btnSkip) btnSkip.hidden = !hasActiveSession;
+  if (btnStop) btnStop.hidden = !hasActiveSession;
+
+  const dashboard = $('#route-active-dashboard');
+  if (!dashboard) return;
+
+  if (hasActiveSession) {
+    dashboard.classList.remove('hidden');
+    dashboard.hidden = false;
+
+    const spriteBox = $('#route-target-sprite-box');
+    if (spriteBox) {
+      const cur = st.currentTarget;
+      if (cur) {
+        const gif = pokeSpriteUrl(cur.speciesId);
+        const png = pokeStaticSpriteUrl(cur.speciesId);
+        spriteBox.replaceChildren(el('img', {
+          src: gif,
+          alt: cur.name,
+          onerror: (e) => { if (png && e.target.src !== png) e.target.src = png; }
+        }));
+      } else {
+        spriteBox.replaceChildren(el('span', { class: 'text-2xl' }, '🏠'));
+      }
+    }
+
+    const pill = $('#route-status-pill');
+    if (pill) {
+      pill.className = `route-status-pill ${isRunning ? 'running' : 'paused'}`;
+      if (isRunning) pill.textContent = '🎯 CAÇANDO AGORA';
+      else if (isPaused) pill.textContent = '⏸️ PAUSADO';
+    }
+
+    const homeInd = $('#route-home-indicator');
+    if (homeInd) {
+      const homeName = st.originalHuntName || st.originalHunt || 'Hunt Atual';
+      homeInd.textContent = `🏠 Retorno: ${homeName}`;
+    }
+
+    const targetTitle = $('#route-target-title');
+    if (targetTitle) {
+      if (st.currentTarget) {
+        targetTitle.textContent = `${st.currentTarget.name} (Nv. ${st.currentTarget.level || 1})`;
+      } else {
+        targetTitle.textContent = 'Aguardando próximo Pokémon…';
+      }
+    }
+
+    const huntSlug = $('#route-target-hunt-slug');
+    if (huntSlug) {
+      huntSlug.textContent = st.currentTarget ? `Hunt: ${st.currentTarget.slug}` : `Status: Em andamento`;
+    }
+
+    const capFill = $('#route-captures-bar-fill');
+    const capText = $('#route-captures-text');
+    const capCurrent = st.currentCaptures || 0;
+    const capTarget = st.targetCapturesPerSpecies || 1;
+    const capPct = Math.min(100, Math.round((capCurrent / capTarget) * 100));
+
+    if (capFill) capFill.style.width = `${capPct}%`;
+    if (capText) capText.textContent = `${capCurrent} / ${capTarget} capturado(s) nesta hunt`;
+
+    const total = st.totalTargets || st.queue?.length || state.route.queue.length || 0;
+    const completed = st.completedTargets ?? 0;
+    const overallPct = st.progressPct ?? (total > 0 ? Math.min(100, Math.round((completed / total) * 100)) : 0);
+
+    const progNum = $('#route-progress-num');
+    const progText = $('#route-progress-text');
+    if (progNum) progNum.textContent = `${overallPct}%`;
+    if (progText) progText.textContent = `${completed} de ${total} concluídos`;
+  } else {
+    dashboard.classList.add('hidden');
+    dashboard.hidden = true;
+  }
+}
+
+function renderRouteQueue() {
+  const container = $('#route-queue-list');
+  const countBadge = $('#route-queue-count');
+  if (!container) return;
+
+  const queue = (state.route.status && state.route.status.running && state.route.status.queue?.length)
+    ? state.route.status.queue
+    : state.route.queue;
+  const currentIndex = state.route.status?.currentIndex ?? -1;
+  const isRunning = Boolean(state.route.status && state.route.status.running);
+
+  if (countBadge) {
+    countBadge.textContent = `${queue.length} Pokémon${queue.length === 1 ? '' : 's'}`;
+  }
+
+  if (!queue.length) {
+    container.replaceChildren(el('div', { class: 'empty', style: 'grid-column: 1/-1' }, 'Nenhum Pokémon na fila. Selecione um Preset acima para carregar a rota.'));
+    return;
+  }
+
+  const cards = queue.map((item, idx) => {
+    let cardState = 'pending';
+    let statusLabel = 'Na Fila';
+    if (item.status === 'completed' || (isRunning && idx < currentIndex)) {
+      cardState = 'completed';
+      statusLabel = '✅ Capturado';
+    } else if (item.status === 'hunting' || item.status === 'active' || (isRunning && idx === currentIndex)) {
+      cardState = 'active';
+      statusLabel = '🎯 Atual';
+    } else if (item.status === 'skipped') {
+      cardState = 'skipped';
+      statusLabel = '⏭️ Pulado';
+    }
+
+    const sprite = pokeStaticSpriteUrl(item.speciesId);
+    const types = item.types || [];
+
+    return el('div', { class: `route-queue-card ${cardState}` },
+      el('div', { class: 'queue-card-index mono' }, `#${idx + 1}`),
+      el('div', { class: 'queue-card-sprite' },
+        sprite ? el('img', { src: sprite, alt: item.name, loading: 'lazy' }) : null
+      ),
+      el('div', { class: 'queue-card-info' },
+        el('div', { class: 'queue-card-header' },
+          el('span', { class: 'queue-card-name' }, item.name),
+          el('span', { class: 'queue-card-lvl mono' }, `Nv ${item.level || 1}`)
+        ),
+        el('div', { class: 'queue-card-meta' },
+          el('span', { class: 'queue-card-slug mono' }, item.slug),
+          typeBadges(types)
+        ),
+        el('div', { class: 'queue-card-status-bar' },
+          el('span', { class: `status-tag ${cardState}` }, statusLabel),
+          item.captures != null && item.captures > 0
+            ? el('span', { class: 'mono text-xs muted' }, `${item.captures} capturado(s)`)
+            : null
+        )
+      ),
+      !isRunning ? el('button', {
+        type: 'button',
+        class: 'btn-queue-remove',
+        title: 'Remover da fila',
+        onclick: (e) => {
+          e.stopPropagation();
+          state.route.queue.splice(idx, 1);
+          renderRouteQueue();
+        }
+      }, '✕') : null
+    );
+  });
+
+  container.replaceChildren(...cards);
+}
+
+function updateRouteBadge() {
+  const badge = $('#route-badge');
+  if (!badge) return;
+  const st = state.route.status;
+  if (st && st.running && !st.paused) {
+    badge.textContent = 'Ativa';
+    badge.classList.remove('hidden');
+    badge.classList.add('running');
+  } else if (st && st.running && st.paused) {
+    badge.textContent = 'Pausada';
+    badge.classList.remove('hidden');
+    badge.classList.remove('running');
+  } else {
+    badge.classList.add('hidden');
+  }
+}
+
+function handleRouteStatusUpdate(status) {
+  if (!status) return;
+  if (state.route.accountId && status.accountId !== state.route.accountId) {
+    return;
+  }
+
+  state.route.status = status;
+  if (status.running && status.queue && status.queue.length > 0) {
+    state.route.queue = status.queue;
+  }
+
+  renderRoutePresets();
+  renderRouteDashboard();
+  renderRouteQueue();
+  updateRouteBadge();
+}
+
+async function startAutoRoute() {
+  const accountId = state.route.accountId || $('#route-account').value;
+  if (!accountId) return alert('Selecione uma conta.');
+
+  const queue = state.route.queue;
+  if (!queue || !queue.length) return alert('A fila de rota está vazia. Selecione um Preset antes de iniciar.');
+
+  const targetPerPoke = Number($('#route-target-captures').value) || 1;
+  const timeoutSec = Number($('#route-max-time').value) || 300;
+  const returnToHome = $('#route-return-home').checked;
+
+  try {
+    const status = await api(`/api/accounts/${encodeURIComponent(accountId)}/route-start`, {
+      method: 'POST',
+      body: {
+        queue,
+        route: queue,
+        targetCaptures: targetPerPoke,
+        targetPerPoke,
+        maxTimeSec: timeoutSec,
+        timeoutSec,
+        returnHome: returnToHome
+      }
+    });
+    handleRouteStatusUpdate(status);
+  } catch (err) {
+    alert(`Erro ao iniciar rota: ${err.message}`);
+  }
+}
+
+async function pauseAutoRoute() {
+  const accountId = state.route.accountId || $('#route-account').value;
+  if (!accountId) return;
+  try {
+    const status = await api(`/api/accounts/${encodeURIComponent(accountId)}/route-pause`, { method: 'POST', body: {} });
+    handleRouteStatusUpdate(status);
+  } catch (err) {
+    alert(`Erro ao pausar: ${err.message}`);
+  }
+}
+
+async function resumeAutoRoute() {
+  const accountId = state.route.accountId || $('#route-account').value;
+  if (!accountId) return;
+  try {
+    const status = await api(`/api/accounts/${encodeURIComponent(accountId)}/route-resume`, { method: 'POST', body: {} });
+    handleRouteStatusUpdate(status);
+  } catch (err) {
+    alert(`Erro ao continuar: ${err.message}`);
+  }
+}
+
+async function skipAutoRouteTarget() {
+  const accountId = state.route.accountId || $('#route-account').value;
+  if (!accountId) return;
+  try {
+    const status = await api(`/api/accounts/${encodeURIComponent(accountId)}/route-skip`, { method: 'POST', body: {} });
+    handleRouteStatusUpdate(status);
+  } catch (err) {
+    alert(`Erro ao pular: ${err.message}`);
+  }
+}
+
+async function stopAutoRoute() {
+  const accountId = state.route.accountId || $('#route-account').value;
+  if (!accountId) return;
+  if (!confirm('Deseja parar a rota automática agora? A conta retornará à hunt base configurada.')) return;
+  try {
+    const status = await api(`/api/accounts/${encodeURIComponent(accountId)}/route-stop`, { method: 'POST', body: {} });
+    handleRouteStatusUpdate(status);
+  } catch (err) {
+    alert(`Erro ao parar rota: ${err.message}`);
+  }
+}
+
 // ---------- Geral ----------
 
 function switchTab(tab) {
@@ -1459,6 +2196,8 @@ function switchTab(tab) {
   if (tab === 'colecao' && $('#col-account').value !== state.collection.accountId) loadCollection();
   if (tab === 'destaques') renderHighlights();
   if (tab === 'mercado') loadCommodityTickers();
+  if (tab === 'bag') loadBag();
+  if (tab === 'rota') loadRouteData();
   if (tab === 'radar') {
     $('#radar-badge')?.classList.add('hidden');
     loadRadar();
@@ -1522,6 +2261,15 @@ function connectEvents() {
       playRadarChime();
     }
   });
+  source.addEventListener('inventory', e => {
+    const data = JSON.parse(e.data);
+    if (state.tab === 'bag' && (!data?.accountId || data.accountId === state.bag.accountId)) {
+      loadBag();
+    }
+  });
+  source.addEventListener('route-status', e => {
+    handleRouteStatusUpdate(JSON.parse(e.data));
+  });
 }
 
 async function loadState() {
@@ -1532,6 +2280,11 @@ async function loadState() {
   state.logs = data.logs;
   state.warnings = data.warnings;
   state.config = data.config;
+  if (data.routes && data.routes.length > 0) {
+    const currentAcc = state.route.accountId || $('#route-account')?.value || data.accounts[0]?.id;
+    const myRoute = data.routes.find(r => r.accountId === currentAcc) || data.routes[0];
+    if (myRoute) handleRouteStatusUpdate(myRoute);
+  }
   renderAccounts();
   renderLogs();
   renderSessionShinies();
@@ -1663,6 +2416,131 @@ function bindUi() {
       renderRadar();
     });
   }
+
+  // Bag & Venda de Itens
+  $('#bag-account')?.addEventListener('change', () => loadBag(true));
+  $('#bag-refresh-btn')?.addEventListener('click', () => loadBag(true));
+  $('#bag-refresh-market-btn')?.addEventListener('click', () => loadBag(true));
+  $('#bag-search')?.addEventListener('input', (e) => {
+    state.bag.search = e.target.value;
+    renderBag();
+  });
+  for (const btn of document.querySelectorAll('#bag-quick-filters .pill-filter')) {
+    btn.addEventListener('click', () => {
+      for (const b of document.querySelectorAll('#bag-quick-filters .pill-filter')) b.classList.remove('active');
+      btn.classList.add('active');
+      state.bag.categoryFilter = btn.dataset.cat;
+      renderBag();
+    });
+  }
+  $('#bag-select-all')?.addEventListener('click', () => {
+    const items = bagFilteredItems();
+    for (const item of items) state.bag.selected.add(item.key);
+    renderBag();
+  });
+  $('#bag-select-none')?.addEventListener('click', () => {
+    state.bag.selected.clear();
+    renderBag();
+  });
+  $('#bag-dock-quicksell')?.addEventListener('click', executeQuickSell);
+  $('#bag-dock-clear')?.addEventListener('click', () => {
+    state.bag.selected.clear();
+    renderBag();
+  });
+
+  // Modal de Precificação / Anúncio
+  $('#item-pricing-qty')?.addEventListener('input', updateItemPricingTotals);
+  $('#item-pricing-unit-price')?.addEventListener('input', updateItemPricingTotals);
+  $('#item-pricing-currency')?.addEventListener('change', (e) => {
+    const item = state.bag.activeItem;
+    if (item) {
+      const summary = state.bag.marketSummary || {};
+      const mkt = summary[item.key] || {};
+      const isDia = e.target.value === 'DIAMONDS';
+      if (isDia) {
+        $('#item-pricing-unit-price').value = mkt.minDia || 1;
+      } else {
+        const npcFloor = item.npcPrice || 1;
+        $('#item-pricing-unit-price').value = mkt.minGold && mkt.minGold > 1 ? Math.max(npcFloor, mkt.minGold - 1) : Math.max(1, npcFloor * 2);
+      }
+    }
+    updateItemPricingTotals();
+  });
+
+  for (const btn of document.querySelectorAll('.quick-qty-btns button')) {
+    btn.addEventListener('click', () => {
+      const item = state.bag.activeItem;
+      if (!item) return;
+      const raw = btn.dataset.qty;
+      let qty = 1;
+      if (raw === '100%') qty = item.quantity;
+      else if (raw === '50%') qty = Math.max(1, Math.floor(item.quantity * 0.5));
+      else if (raw === '25%') qty = Math.max(1, Math.floor(item.quantity * 0.25));
+      else qty = Math.max(1, Math.min(item.quantity, Number(raw) || 1));
+      $('#item-pricing-qty').value = qty;
+      updateItemPricingTotals();
+    });
+  }
+
+  $('#item-btn-undercut')?.addEventListener('click', () => {
+    const item = state.bag.activeItem;
+    if (!item) return;
+    const summary = state.bag.marketSummary || {};
+    const mkt = summary[item.key] || {};
+    const currency = $('#item-pricing-currency').value;
+    if (currency === 'DIAMONDS') {
+      $('#item-pricing-unit-price').value = mkt.minDia && mkt.minDia > 1 ? mkt.minDia - 1 : (mkt.minDia || 1);
+    } else {
+      const npcFloor = item.npcPrice || 1;
+      $('#item-pricing-unit-price').value = mkt.minGold && mkt.minGold > 1 ? Math.max(npcFloor, mkt.minGold - 1) : npcFloor;
+    }
+    updateItemPricingTotals();
+  });
+
+  $('#item-btn-match-min')?.addEventListener('click', () => {
+    const item = state.bag.activeItem;
+    if (!item) return;
+    const summary = state.bag.marketSummary || {};
+    const mkt = summary[item.key] || {};
+    const currency = $('#item-pricing-currency').value;
+    if (currency === 'DIAMONDS') {
+      $('#item-pricing-unit-price').value = mkt.minDia || 1;
+    } else {
+      const npcFloor = item.npcPrice || 1;
+      $('#item-pricing-unit-price').value = mkt.minGold || npcFloor;
+    }
+    updateItemPricingTotals();
+  });
+
+  $('#item-btn-median')?.addEventListener('click', () => {
+    const item = state.bag.activeItem;
+    if (!item) return;
+    const summary = state.bag.marketSummary || {};
+    const mkt = summary[item.key] || {};
+    const currency = $('#item-pricing-currency').value;
+    if (currency === 'DIAMONDS') {
+      $('#item-pricing-unit-price').value = mkt.medianDia || mkt.minDia || 1;
+    } else {
+      const npcFloor = item.npcPrice || 1;
+      $('#item-pricing-unit-price').value = mkt.medianGold || (mkt.minGold || npcFloor * 2);
+    }
+    updateItemPricingTotals();
+  });
+
+  $('#item-pricing-submit')?.addEventListener('click', submitItemListing);
+
+  // Rota Automática
+  $('#route-account')?.addEventListener('change', () => loadRouteData(true));
+  $('#route-btn-start')?.addEventListener('click', startAutoRoute);
+  $('#route-btn-pause')?.addEventListener('click', pauseAutoRoute);
+  $('#route-btn-resume')?.addEventListener('click', resumeAutoRoute);
+  $('#route-btn-skip')?.addEventListener('click', skipAutoRouteTarget);
+  $('#route-btn-stop')?.addEventListener('click', stopAutoRoute);
+  $('#route-clear-queue-btn')?.addEventListener('click', () => {
+    state.route.queue = [];
+    renderRouteQueue();
+  });
+
   setInterval(renderAccounts, 5000);
 }
 

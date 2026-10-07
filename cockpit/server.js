@@ -13,6 +13,7 @@ const { scanMarket, searchDirectMarket, estimatePrice, fetchCommodityTickers } =
 const { buildSpeciesIndex } = require('../shared/species.js');
 const { classifyCollection } = require('../shared/classifier.js');
 const { DiscordNotifier } = require('./discord.js');
+const { RouteRunner, buildPresetRoutes } = require('./route-runner.js');
 
 const PORT = Number(process.env.PIW_PORT) || 8787;
 const HOST = process.env.PIW_HOST || '0.0.0.0';
@@ -28,7 +29,6 @@ function isAllowedOrigin(origin) {
 }
 // A aba abre numa página sem login (Pokepedia); o userscript grava os tokens e segue para /play.
 const HANDOFF_URL = 'https://poke.idleworld.online/pokepedia';
-const HIGHLIGHT_TAGS = new Set(['raro', 'top', 'matriz']);
 const HEARTBEAT_TIMEOUT = 90000;
 const CACHE_DIR = path.join(__dirname, '.cache');
 const STATIC = {
@@ -75,7 +75,35 @@ async function loadSpecies(api) {
   }
 }
 
-function createApp({ store, api, species }) {
+function resolveItemIcon(icon) {
+  if (!icon) return null;
+  if (/^(https?:)?\//.test(icon)) return icon;
+  return `/assets/items/${icon}`;
+}
+
+async function loadItems(api) {
+  const cacheFile = path.join(CACHE_DIR, 'items.json');
+  try {
+    const data = await api.items();
+    const rawList = Array.isArray(data?.items) ? data.items : (Array.isArray(data) ? data : []);
+    fs.mkdirSync(CACHE_DIR, { recursive: true });
+    fs.writeFileSync(cacheFile, JSON.stringify(rawList));
+    const byId = new Map();
+    for (const it of rawList) if (it?.id != null) byId.set(Number(it.id), it);
+    return { list: rawList, byId, get: id => byId.get(Number(id)) ?? null };
+  } catch (error) {
+    if (fs.existsSync(cacheFile)) {
+      const rawList = JSON.parse(fs.readFileSync(cacheFile, 'utf8'));
+      const byId = new Map();
+      for (const it of rawList) if (it?.id != null) byId.set(Number(it.id), it);
+      return { list: rawList, byId, get: id => byId.get(Number(id)) ?? null };
+    }
+    console.warn(`Sem items.json (${error.message}); Metadados de itens ficam indisponíveis.`);
+    return { list: [], byId: new Map(), get: () => null };
+  }
+}
+
+function createApp({ store, api, species, itemsCatalog }) {
   const accounts = new Map();
   const heartbeats = new Map();
   const handoffCodes = new Map();
@@ -87,6 +115,20 @@ function createApp({ store, api, species }) {
   const classifiedCache = new WeakMap();
   let market = null;
   const discord = new DiscordNotifier({ getWebhookUrl: () => process.env.DISCORD_WEBHOOK_URL || store.config?.discordWebhook || null });
+  const routeRunners = new Map();
+
+  function getRouteRunner(account) {
+    if (!routeRunners.has(account.id)) {
+      const runner = new RouteRunner({
+        account,
+        speciesCatalog: species,
+        onLog: pushLog,
+        onStatusChange: status => broadcast('route-status', status)
+      });
+      routeRunners.set(account.id, runner);
+    }
+    return routeRunners.get(account.id);
+  }
 
   function broadcast(event, data) {
     const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
@@ -127,16 +169,6 @@ function createApp({ store, api, species }) {
       accountName: account.name,
       text: `${emoji} Shiny ${speciesName} ${actionText} (${entry.hunt})`
     });
-
-    if (discord) {
-      discord.sendAlert(
-        account.name,
-        account.id,
-        'shiny',
-        `✨ **SHINY ${encounter.type.toUpperCase()}!** Pokémon: ${speciesName} (${entry.hunt})`,
-        'success'
-      );
-    }
   }
 
   function classified(account) {
@@ -177,6 +209,8 @@ function createApp({ store, api, species }) {
     });
     account.on('state', () => broadcast('account', summary(account)));
     account.on('pokes', () => broadcast('account', summary(account)));
+    account.on('inventory', () => broadcast('inventory', { accountId: account.id }));
+    account.on('balls', () => broadcast('inventory', { accountId: account.id }));
     account.on('log', pushLog);
     account.on('hunt', slug => store.upsert({ id: record.id, lastHunt: slug }));
     account.on('leader', lead => store.upsert({ id: record.id, lastLeader: lead }));
@@ -197,7 +231,13 @@ function createApp({ store, api, species }) {
         junk.set(account.id, [...(junk.get(account.id) ?? []), at]);
         return;
       }
-      if (!item.tags.some(t => HIGHLIGHT_TAGS.has(t))) return;
+      const hlCfg = store.config.highlight || { minQuality: 1.7, minIv: 130 };
+      const isGoodCatch = Boolean(
+        item.isDitto ||
+        (item.quality != null && item.ivTotal != null &&
+         item.quality >= hlCfg.minQuality && item.ivTotal >= hlCfg.minIv)
+      );
+      if (!isGoodCatch) return;
       const entry = { at, account: account.id, accountName: account.name, poke: { ...item, profile: species.profile(item.speciesId) } };
       highlights.unshift(entry);
       highlights.length = Math.min(highlights.length, 500);
@@ -383,6 +423,245 @@ function createApp({ store, api, species }) {
     }
   }
 
+  let cachedItemsMarket = null;
+  let lastItemsMarketFetch = 0;
+
+  function formatItemsMarketSummary(payload, account) {
+    const listings = Array.isArray(payload?.listings) ? payload.listings : [];
+    const byKey = new Map();
+
+    for (const l of listings) {
+      const kind = l.kind || (l.category === 'Pokemon' ? 'pokemon' : 'item');
+      if (kind === 'pokemon') continue;
+      const refId = Number(l.refId ?? l.id);
+      if (!refId) continue;
+      const k = `${kind}:${refId}`;
+      if (!byKey.has(k)) byKey.set(k, { gold: [], dia: [] });
+      const entry = byKey.get(k);
+      const price = Number(l.price ?? l.totalPrice) || 0;
+      const qty = Number(l.quantity) || 1;
+      const currency = String(l.currency || 'GOLD').toUpperCase();
+      if (price > 0 && !l.offerOnly) {
+        if (currency === 'GOLD') entry.gold.push({ price, qty, sellers: l.sellers || 1 });
+        else if (currency === 'DIAMONDS') entry.dia.push({ price, qty, sellers: l.sellers || 1 });
+      }
+    }
+
+    const summary = {};
+    for (const [k, v] of byKey) {
+      v.gold.sort((a, b) => a.price - b.price);
+      v.dia.sort((a, b) => a.price - b.price);
+
+      const goldPrices = v.gold.map(x => x.price);
+      const diaPrices = v.dia.map(x => x.price);
+      const totalGoldQty = v.gold.reduce((s, x) => s + x.qty, 0);
+      const totalDiaQty = v.dia.reduce((s, x) => s + x.qty, 0);
+
+      summary[k] = {
+        minGold: goldPrices[0] ?? null,
+        medianGold: goldPrices.length ? goldPrices[Math.floor(goldPrices.length / 2)] : null,
+        avgGold: goldPrices.length ? Math.round(goldPrices.reduce((a, b) => a + b, 0) / goldPrices.length) : null,
+        totalGoldQty,
+        goldDepth: v.gold.slice(0, 10),
+        minDia: diaPrices[0] ?? null,
+        medianDia: diaPrices.length ? diaPrices[Math.floor(diaPrices.length / 2)] : null,
+        avgDia: diaPrices.length ? Math.round(diaPrices.reduce((a, b) => a + b, 0) / diaPrices.length) : null,
+        totalDiaQty,
+        diaDepth: v.dia.slice(0, 10)
+      };
+    }
+
+    const mine = Array.isArray(payload?.mine) ? payload.mine.map(m => ({
+      id: String(m.id ?? ''),
+      refId: Number(m.refId ?? m.id),
+      kind: m.kind || 'item',
+      name: m.name || m.pokemon?.name || 'Item',
+      quantity: Number(m.quantity) || 1,
+      price: Number(m.price ?? m.totalPrice),
+      currency: String(m.currency ?? 'GOLD').toUpperCase(),
+      at: m.at ?? null
+    })) : [];
+
+    return { at: Date.now(), summary, mine };
+  }
+
+  async function fetchItemsMarketData(accountId) {
+    const now = Date.now();
+    let account = accountId ? accounts.get(accountId) : null;
+    if (!account) {
+      const list = [...accounts.values()].filter(a => a.tokens?.accessToken);
+      if (!list.length) throw httpError(400, 'Nenhuma conta conectada para consultar o mercado.');
+      account = list[0];
+    }
+
+    if (cachedItemsMarket && now - lastItemsMarketFetch < 15 * 1000) {
+      return formatItemsMarketSummary(cachedItemsMarket, account);
+    }
+
+    const payload = await account.withAuth(token => api.marketCategory(token, 'All'));
+    cachedItemsMarket = payload;
+    lastItemsMarketFetch = now;
+    return formatItemsMarketSummary(payload, account);
+  }
+
+  async function getAccountBag(account, fresh = false) {
+    if (fresh || !account.inventory) {
+      await account.fetchBag(1200);
+    } else {
+      account.refreshBag();
+    }
+
+    const rawInv = account.inventory ?? [];
+    const rawBalls = account.balls ?? { catalog: [], counts: {} };
+
+    const items = [];
+    // 1. Itens comuns da Bag
+    for (const inv of rawInv) {
+      if (!inv || !inv.quantity || inv.quantity <= 0) continue;
+      const meta = itemsCatalog?.get(inv.itemId) || {};
+      items.push({
+        key: `item:${inv.itemId}`,
+        kind: 'item',
+        refId: Number(inv.itemId),
+        name: meta.name || `Item #${inv.itemId}`,
+        category: meta.category || 'loot',
+        quantity: Number(inv.quantity),
+        npcPrice: meta.npcPrice ?? null,
+        priceGold: meta.priceGold ?? null,
+        rare: Boolean(meta.rare),
+        icon: resolveItemIcon(meta.icon),
+        description: meta.description || ''
+      });
+    }
+
+    // 2. Pokébolas não-vinculadas
+    if (Array.isArray(rawBalls.catalog)) {
+      for (const b of rawBalls.catalog) {
+        const count = Math.floor(Number(rawBalls.counts[String(b.id)] ?? 0));
+        if (count > 0 && !b.bound && !b.infinite) {
+          items.push({
+            key: `ball:${b.id}`,
+            kind: 'ball',
+            refId: Number(b.id),
+            name: b.name || `Ball #${b.id}`,
+            category: 'ball',
+            quantity: count,
+            npcPrice: b.priceGold ? Math.floor(b.priceGold / 2) : 1,
+            priceGold: b.priceGold ?? null,
+            rare: false,
+            icon: resolveItemIcon(b.iconUrl),
+            description: `Taxa de captura: x${b.catchRate || 1}`
+          });
+        }
+      }
+    }
+
+    items.sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
+
+    return {
+      accountId: account.id,
+      accountName: account.name,
+      gold: account.state.gold,
+      diamonds: account.state.diamonds,
+      items
+    };
+  }
+
+  async function quickSellItems(account, itemsToSell) {
+    if (!Array.isArray(itemsToSell) || !itemsToSell.length) throw httpError(400, 'Nenhum item informado para venda.');
+    const marketData = await fetchItemsMarketData(account.id);
+    const summary = marketData.summary || {};
+    const bag = await getAccountBag(account, true);
+    const bagMap = new Map(bag.items.map(it => [it.key, it]));
+
+    const results = [];
+    for (const req of itemsToSell) {
+      const key = `${req.kind || 'item'}:${req.refId}`;
+      const bagItem = bagMap.get(key);
+      if (!bagItem) {
+        results.push({ key, success: false, error: 'Item não encontrado no inventário' });
+        continue;
+      }
+
+      const qty = Math.min(Math.max(1, Math.floor(Number(req.quantity) || bagItem.quantity)), bagItem.quantity);
+      if (qty <= 0) continue;
+
+      const currency = req.currency === 'DIAMONDS' ? 'DIAMONDS' : 'GOLD';
+      let price = Number(req.price) || 0;
+
+      if (!price || price <= 0) {
+        // Cálculo automático de menor preço
+        const marketItem = summary[key];
+        const npcFloor = bagItem.npcPrice || 1;
+        if (currency === 'GOLD') {
+          if (marketItem?.minGold && marketItem.minGold > 1) {
+            // 1 Gold a menos que o menor anúncio ativo
+            price = Math.max(npcFloor, marketItem.minGold - 1);
+          } else if (marketItem?.minGold === 1) {
+            price = 1;
+          } else {
+            price = Math.max(1, npcFloor * 2);
+          }
+        } else {
+          // DIAMONDS
+          if (marketItem?.minDia && marketItem.minDia > 1) {
+            price = Math.max(1, marketItem.minDia - 1);
+          } else {
+            price = marketItem?.minDia || 1;
+          }
+        }
+      }
+
+      // Garante piso do NPC para ouro
+      if (currency === 'GOLD' && bagItem.npcPrice && price < bagItem.npcPrice) {
+        price = bagItem.npcPrice;
+      }
+      price = Math.max(1, Math.floor(price));
+
+      try {
+        await account.listItem({
+          kind: req.kind || 'item',
+          refId: Number(req.refId),
+          quantity: qty,
+          price,
+          currency
+        });
+
+        pushLog({
+          at: Date.now(),
+          account: account.id,
+          accountName: account.name,
+          text: `🏷️ Anunciado no mercado: x${qty.toLocaleString('pt-BR')} ${bagItem.name} por ${currency === 'DIAMONDS' ? '💎' : '$'} ${price.toLocaleString('pt-BR')} cada.`
+        });
+
+        results.push({ key, name: bagItem.name, quantity: qty, price, currency, success: true });
+      } catch (err) {
+        results.push({ key, name: bagItem.name, quantity: qty, price, currency, success: false, error: err.message });
+      }
+
+      await new Promise(r => setTimeout(r, 200));
+    }
+
+    // Invalida cache do mercado e atualiza a bag
+    cachedItemsMarket = null;
+    account.refreshBag();
+    return { results };
+  }
+
+  async function cancelListing(account, listingId) {
+    if (!listingId) throw httpError(400, 'ID do anúncio obrigatório.');
+    const res = await account.withAuth(token => api.marketAction(token, { action: 'cancel', id: String(listingId) }));
+    pushLog({
+      at: Date.now(),
+      account: account.id,
+      accountName: account.name,
+      text: `✕ Anúncio ${listingId} cancelado no mercado.`
+    });
+    cachedItemsMarket = null;
+    account.refreshBag();
+    return res;
+  }
+
   let radarMatches = [];
   const radarSeenIds = new Set();
 
@@ -526,12 +805,27 @@ function createApp({ store, api, species }) {
 
     if (req.method === 'GET' && p === '/api/state') {
       return sendJson(res, 200, {
-        accounts: [...accounts.values()].map(summary), highlights, shinies: sessionShinies, logs,
+        accounts: [...accounts.values()].map(summary),
+        routes: [...accounts.values()].map(a => getRouteRunner(a).getStatus()),
+        highlights, shinies: sessionShinies, logs,
         warnings: store.warnings, config: store.config
       });
     }
     if (req.method === 'POST' && p === '/api/accounts') {
       return sendJson(res, 200, await registerAccount(await readBody(req), { fromTab: false }));
+    }
+    if (req.method === 'GET' && p === '/api/routes/presets') {
+      const accountId = url.searchParams.get('accountId');
+      const account = accountId ? accounts.get(accountId) : [...accounts.values()][0];
+      const ownedSpeciesSet = new Set();
+      if (account?.pokes) {
+        for (const poke of account.pokes) {
+          if (poke?.speciesId) ownedSpeciesSet.add(Number(poke.speciesId));
+        }
+      }
+      return sendJson(res, 200, {
+        presets: buildPresetRoutes(species.all ? species.all() : [], ownedSpeciesSet)
+      });
     }
     if (req.method === 'GET' && p === '/api/species') {
       return sendJson(res, 200, {
@@ -543,6 +837,23 @@ function createApp({ store, api, species }) {
     if (req.method === 'POST' && p === '/api/market/scan') return sendJson(res, 200, await startMarket(await readBody(req)));
     if (req.method === 'POST' && p === '/api/market/cancel') { market?.abort(); return sendJson(res, 200, { ok: true }); }
     if (req.method === 'GET' && p === '/api/market/tickers') return sendJson(res, 200, await getCommodityTickers());
+    if (req.method === 'GET' && p === '/api/items/catalog') return sendJson(res, 200, { items: itemsCatalog.list });
+    if (req.method === 'GET' && p === '/api/market/items-summary') return sendJson(res, 200, await fetchItemsMarketData(url.searchParams.get('accountId')));
+    if (req.method === 'POST' && p === '/api/market/sell-item') {
+      const body = await readBody(req);
+      const account = getAccount(body.accountId);
+      return sendJson(res, 200, await quickSellItems(account, [body]));
+    }
+    if (req.method === 'POST' && p === '/api/market/quick-sell') {
+      const body = await readBody(req);
+      const account = getAccount(body.accountId);
+      return sendJson(res, 200, await quickSellItems(account, body.items || []));
+    }
+    if (req.method === 'POST' && p === '/api/market/cancel-item') {
+      const body = await readBody(req);
+      const account = getAccount(body.accountId);
+      return sendJson(res, 200, await cancelListing(account, body.listingId));
+    }
 
     if (req.method === 'GET' && p === '/api/radar') return sendJson(res, 200, { wishlist: store.getWishlist(), matches: radarMatches });
     if (req.method === 'POST' && p === '/api/radar/wishlist') {
@@ -565,7 +876,7 @@ function createApp({ store, api, species }) {
       return sendJson(res, 200, { ok: true });
     }
 
-    const m = p.match(/^\/api\/accounts\/([^/]+)(?:\/([a-z]+))?$/);
+    const m = p.match(/^\/api\/accounts\/([^/]+)(?:\/([a-z0-9_-]+))?$/);
     if (!m) throw httpError(404, 'Rota não encontrada.');
     const account = getAccount(decodeURIComponent(m[1]));
     const action = m[2];
@@ -577,6 +888,40 @@ function createApp({ store, api, species }) {
       return sendJson(res, 200, { ok: true });
     }
     if (req.method === 'GET' && action === 'pokes') return sendJson(res, 200, { pokes: collectionView(account) });
+    if (req.method === 'GET' && action === 'bag') {
+      const fresh = url.searchParams.get('fresh') === '1' || url.searchParams.get('force') === '1';
+      return sendJson(res, 200, await getAccountBag(account, fresh));
+    }
+    if (req.method === 'GET' && action === 'route') {
+      const runner = getRouteRunner(account);
+      return sendJson(res, 200, runner.getStatus());
+    }
+    if (req.method === 'POST' && action === 'route-start') {
+      const body = await readBody(req);
+      const runner = getRouteRunner(account);
+      runner.start(body);
+      return sendJson(res, 200, runner.getStatus());
+    }
+    if (req.method === 'POST' && action === 'route-pause') {
+      const runner = getRouteRunner(account);
+      runner.pause();
+      return sendJson(res, 200, runner.getStatus());
+    }
+    if (req.method === 'POST' && action === 'route-resume') {
+      const runner = getRouteRunner(account);
+      runner.resume();
+      return sendJson(res, 200, runner.getStatus());
+    }
+    if (req.method === 'POST' && action === 'route-skip') {
+      const runner = getRouteRunner(account);
+      runner.skipCurrent();
+      return sendJson(res, 200, runner.getStatus());
+    }
+    if (req.method === 'POST' && action === 'route-stop') {
+      const runner = getRouteRunner(account);
+      runner.stop(true);
+      return sendJson(res, 200, runner.getStatus());
+    }
     if (req.method === 'POST' && action === 'sell') return sendJson(res, 200, await sell(account, (await readBody(req)).pokeIds));
     if (req.method === 'POST' && action === 'lock') {
       const body = await readBody(req);
@@ -637,10 +982,11 @@ async function main() {
   const api = createGameApi();
   const store = createStore(__dirname);
   const species = await loadSpecies(api);
-  const app = createApp({ store, api, species });
+  const itemsCatalog = await loadItems(api);
+  const app = createApp({ store, api, species, itemsCatalog });
   app.server.listen(PORT, HOST, () => {
     const url = `http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}`;
-    console.log(`Cockpit em ${url} (${species.size} espécies carregadas).`);
+    console.log(`Cockpit em ${url} (${species.size} espécies, ${itemsCatalog.list.length} itens carregados).`);
     for (const warning of store.warnings) console.warn(warning);
     if (process.platform === 'win32' && !process.env.PIW_NO_OPEN) exec(`start "" ${url}`);
     app.startAll();

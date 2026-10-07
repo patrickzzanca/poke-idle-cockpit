@@ -13,7 +13,7 @@ services:
     ports:
       - "8787:8787"
     volumes:
-      - .:/app
+      - /mnt/Sam/docker/poke-cockpit:/app
     restart: unless-stopped
     labels:
       icon: https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/items/poke-ball.png

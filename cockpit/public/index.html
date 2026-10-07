@@ -23,6 +23,8 @@
       <button data-tab="colecao" class="nav-pill">Coleção</button>
       <button data-tab="destaques" class="nav-pill">Destaques</button>
       <button data-tab="mercado" class="nav-pill">Mercado</button>
+      <button data-tab="bag" class="nav-pill" id="tab-pill-bag">🎒 Bag & Venda</button>
+      <button data-tab="rota" class="nav-pill" id="tab-pill-rota">🧭 Rota Automática <span id="route-badge" class="counter-badge hidden">Ativa</span></button>
       <button data-tab="radar" class="nav-pill" id="tab-pill-radar">🎯 Radar <span id="radar-badge" class="counter-badge hidden">0</span></button>
     </nav>
     <div class="top-actions">
@@ -252,7 +254,253 @@
         </div>
       </div>
     </section>
+
+    <!-- TAB 6: BAG & VENDA DE ITENS -->
+    <section id="tab-bag" class="tab" hidden>
+      <div class="controls hardware-card">
+        <label>Conta <select id="bag-account"></select></label>
+        <div class="quick-filters" id="bag-quick-filters">
+          <button type="button" class="pill-filter active" data-cat="">Todos</button>
+          <button type="button" class="pill-filter" data-cat="loot">📦 Drops / Loot</button>
+          <button type="button" class="pill-filter" data-cat="evolution,stone,stones">💎 Pedras</button>
+          <button type="button" class="pill-filter" data-cat="heal">🧪 Poções / Heal</button>
+          <button type="button" class="pill-filter" data-cat="ball">🔴 Pokébolas</button>
+          <button type="button" class="pill-filter" data-cat="held,equipment">⚔️ Equipáveis</button>
+        </div>
+        <label>Busca <input id="bag-search" placeholder="Nome do item"></label>
+        <div class="select-actions">
+          <button id="bag-refresh-btn" type="button" class="btn-hardware-subtle small" title="Atualizar inventário da bag">🔄 Atualizar Bag</button>
+          <button id="bag-select-all" type="button" class="btn-hardware-subtle small">Selecionar tudo</button>
+          <button id="bag-select-none" type="button" class="btn-hardware-subtle small">Desmarcar</button>
+        </div>
+        <span id="bag-count" class="muted mono"></span>
+      </div>
+
+      <!-- Grid de Itens do Inventário -->
+      <div id="bag-grid" class="bag-items-grid"></div>
+
+      <!-- Floating Dock de Venda Rápida -->
+      <div id="bag-floating-dock" class="floating-dock hidden">
+        <div class="dock-info">
+          <span class="dock-dot"></span>
+          <span id="bag-dock-text">0 itens selecionados</span>
+        </div>
+        <div class="dock-actions">
+          <button id="bag-dock-quicksell" type="button" class="btn-crimson small" style="font-weight:700">⚡ Venda Rápida (Menor Preço - $1)</button>
+          <button id="bag-dock-clear" type="button" class="btn-hardware-subtle small">✕</button>
+        </div>
+      </div>
+
+      <!-- Painel de Meus Anúncios Ativos -->
+      <div class="panel hardware-card" style="margin-top:1.5rem">
+        <div class="panel-header-row">
+          <div class="panel-title-with-badge">
+            <h2>🏷️ Meus Anúncios Ativos de Itens</h2>
+            <span id="bag-my-listings-count" class="counter-badge">0 ativos</span>
+          </div>
+          <button id="bag-refresh-market-btn" type="button" class="btn-hardware-subtle small">🔄 Atualizar Anúncios</button>
+        </div>
+        <div id="bag-my-listings-list" class="bag-my-listings-grid"></div>
+      </div>
+    </section>
+
+    <!-- TAB 7: ROTA AUTOMÁTICA & EXPEDIÇÃO -->
+    <section id="tab-rota" class="tab" hidden>
+      <div class="route-header-card hardware-card">
+        <div class="route-top-controls">
+          <label>Conta: <select id="route-account"></select></label>
+          <div class="route-quick-presets">
+            <span class="muted text-xs bold">PRESETS RÁPIDOS:</span>
+            <div id="route-preset-chips" class="preset-chips-container"></div>
+          </div>
+        </div>
+
+        <div class="route-params-row">
+          <div class="param-group">
+            <label>Capturas por Espécie:</label>
+            <select id="route-target-captures">
+              <option value="1">1 captura (Avança de primeira)</option>
+              <option value="2">2 capturas</option>
+              <option value="3">3 capturas</option>
+              <option value="5">5 capturas</option>
+            </select>
+          </div>
+          <div class="param-group">
+            <label>Tempo Máximo por Hunt:</label>
+            <select id="route-max-time">
+              <option value="180">3 minutos (Ultra Rápido)</option>
+              <option value="300" selected>5 minutos (Padrão)</option>
+              <option value="600">10 minutos</option>
+            </select>
+          </div>
+          <div class="param-group checkbox-group">
+            <label class="checkbox-label">
+              <input type="checkbox" id="route-return-home" checked>
+              <span>Voltar à hunt base ao terminar</span>
+            </label>
+          </div>
+          <div class="route-main-actions">
+            <button type="button" id="route-btn-start" class="btn-hardware-action">▶️ Iniciar Rota Automática</button>
+            <button type="button" id="route-btn-pause" class="btn-hardware-subtle" hidden>⏸️ Pausar</button>
+            <button type="button" id="route-btn-resume" class="btn-hardware-action" hidden>▶️ Continuar</button>
+            <button type="button" id="route-btn-skip" class="btn-hardware-subtle" hidden title="Pular Pokémon atual">⏭️ Pular Atual</button>
+            <button type="button" id="route-btn-stop" class="btn-crimson" hidden>⏹️ Parar Rota</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Card de Status da Rota Ativa -->
+      <div id="route-active-dashboard" class="route-dashboard-panel hardware-card hidden">
+        <div class="dashboard-target-hero">
+          <div class="target-sprite-pocket" id="route-target-sprite-box"></div>
+          <div class="target-info-col">
+            <div class="target-badge-row">
+              <span class="route-status-pill running" id="route-status-pill">🎯 CAÇANDO AGORA</span>
+              <span class="mono text-xs muted" id="route-home-indicator">🏠 Retorno: Ancient Pinsir</span>
+            </div>
+            <h2 id="route-target-title" class="target-title">Caterpie Nv 1</h2>
+            <div class="target-hunt-slug mono text-xs muted" id="route-target-hunt-slug">Hunt: caterpie</div>
+            <div class="target-captures-meter">
+              <div class="meter-bar"><div id="route-captures-bar-fill" class="meter-fill" style="width:0%"></div></div>
+              <span id="route-captures-text" class="mono bold text-xs">0 / 1 capturado</span>
+            </div>
+          </div>
+          <div class="dashboard-overall-progress">
+            <span class="text-xs muted bold">PROGRESSO GERAL</span>
+            <div class="big-progress-number mono" id="route-progress-num">0%</div>
+            <span class="mono text-xs muted" id="route-progress-text">0 de 0 concluídos</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Fila / Lista de Alvos da Rota -->
+      <div class="panel hardware-card" style="margin-top:1.2rem">
+        <div class="panel-header-row">
+          <div class="panel-title-with-badge">
+            <h2>📋 Fila de Pokémon da Rota</h2>
+            <span id="route-queue-count" class="counter-badge">0 na fila</span>
+          </div>
+          <div class="queue-header-actions">
+            <button type="button" id="route-clear-queue-btn" class="btn-hardware-subtle small">🗑️ Limpar Fila</button>
+          </div>
+        </div>
+        <div id="route-queue-list" class="route-queue-grid"></div>
+      </div>
+    </section>
   </main>
+
+  <dialog id="dlg-item-pricing">
+    <form method="dialog" class="dlg dlg-wide">
+      <div class="dlg-item-header">
+        <div id="item-pricing-icon" class="dlg-item-icon-box"></div>
+        <div class="dlg-item-title-col">
+          <h2 id="item-pricing-name">Nome do Item</h2>
+          <div class="dlg-item-tags">
+            <span id="item-pricing-cat" class="tag">Loot</span>
+            <span id="item-pricing-owned" class="mono text-xs muted">Na bag: 0</span>
+            <span id="item-pricing-npc" class="mono text-xs muted">Piso NPC: $ 0</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Cotações Atuais do Mercado -->
+      <div class="market-quote-box hardware-card">
+        <div class="quote-cols">
+          <div class="quote-col">
+            <span class="quote-title">💰 Cotação em Gold ($)</span>
+            <div class="quote-metric-row">
+              <div class="metric-mini">
+                <span class="label">Menor Ativo</span>
+                <span id="quote-gold-min" class="val pos mono">—</span>
+              </div>
+              <div class="metric-mini">
+                <span class="label">Mediana</span>
+                <span id="quote-gold-med" class="val mono">—</span>
+              </div>
+              <div class="metric-mini">
+                <span class="label">Total à Venda</span>
+                <span id="quote-gold-qty" class="val mono">—</span>
+              </div>
+            </div>
+            <div id="quote-gold-depth" class="depth-mini-list"></div>
+          </div>
+          <div class="quote-col">
+            <span class="quote-title">💎 Cotação em Diamantes</span>
+            <div class="quote-metric-row">
+              <div class="metric-mini">
+                <span class="label">Menor Ativo</span>
+                <span id="quote-dia-min" class="val pos mono">—</span>
+              </div>
+              <div class="metric-mini">
+                <span class="label">Mediana</span>
+                <span id="quote-dia-med" class="val mono">—</span>
+              </div>
+              <div class="metric-mini">
+                <span class="label">Total à Venda</span>
+                <span id="quote-dia-qty" class="val mono">—</span>
+              </div>
+            </div>
+            <div id="quote-dia-depth" class="depth-mini-list"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Formulário de Criação de Anúncio -->
+      <div class="item-announce-form">
+        <div class="form-row-2">
+          <div class="form-group">
+            <label>Quantidade para Anunciar</label>
+            <div class="input-with-addons">
+              <input type="number" id="item-pricing-qty" min="1" value="1" class="mono bold">
+              <div class="quick-qty-btns">
+                <button type="button" class="btn-hardware-subtle small" data-qty="1">1</button>
+                <button type="button" class="btn-hardware-subtle small" data-qty="25%">25%</button>
+                <button type="button" class="btn-hardware-subtle small" data-qty="50%">50%</button>
+                <button type="button" class="btn-hardware-subtle small" data-qty="100%">Max</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>Moeda</label>
+            <select id="item-pricing-currency">
+              <option value="GOLD">💰 Gold ($)</option>
+              <option value="DIAMONDS">💎 Diamantes</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>Preço Unitário</label>
+          <div class="input-with-addons">
+            <input type="number" id="item-pricing-unit-price" min="1" value="1" class="mono bold">
+            <div class="quick-price-helpers">
+              <button type="button" id="item-btn-undercut" class="btn-hardware-subtle small" title="1 Gold abaixo do menor preço ativo">⚡ Menor - $1</button>
+              <button type="button" id="item-btn-match-min" class="btn-hardware-subtle small" title="Igual ao menor preço ativo">Menor</button>
+              <button type="button" id="item-btn-median" class="btn-hardware-subtle small" title="Preço Mediano do mercado">Mediana</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="announce-summary-bar">
+          <div class="summary-line">
+            <span>Receita Total:</span>
+            <b id="item-pricing-total-rev" class="mono pos">$ 0</b>
+          </div>
+          <div class="summary-line text-xs muted">
+            <span>Taxa do Mercado (3% em Gold):</span>
+            <span id="item-pricing-fee" class="mono">$ 0</span>
+          </div>
+        </div>
+      </div>
+
+      <p id="item-pricing-error" class="error"></p>
+      <div class="dlg-actions">
+        <button value="cancel" class="btn-hardware-subtle">Cancelar</button>
+        <button type="button" id="item-pricing-submit" class="btn-hardware-action">📢 Criar Anúncio</button>
+      </div>
+    </form>
+  </dialog>
 
   <dialog id="dlg-estimate">
     <form method="dialog" class="dlg">

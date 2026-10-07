@@ -42,7 +42,9 @@ function createGameApi({ fetchImpl = globalThis.fetch, origin = ORIGIN } = {}) {
       return request(`/api/game/market?${q.toString()}`, { token, signal });
     },
     marketCategory: (token, category, signal) => request(`/api/game/market?category=${encodeURIComponent(category)}`, { token, signal }),
-    creatures: () => request('/game/creatures.json')
+    marketAction: (token, body) => request('/api/game/market/action', { method: 'POST', token, body }),
+    creatures: () => request('/game/creatures.json'),
+    items: () => request('/game/items.json')
   };
 }
 
