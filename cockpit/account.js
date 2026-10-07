@@ -410,6 +410,12 @@ class Account extends EventEmitter {
         this.balls = { catalog: Array.isArray(message.catalog) ? message.catalog : [], counts: message.counts ?? {} };
         this.emit('balls', this.balls);
         break;
+      case 'field-none':
+        this.emit('field-none', message);
+        break;
+      case 'error':
+        this.emit('game-error', message);
+        break;
     }
   }
 

@@ -34,6 +34,8 @@ class RouteRunner {
 
     this.timer = null;
     this.onCaptureBound = this.handleCapture.bind(this);
+    this.onFieldNoneBound = this.handleFieldNone.bind(this);
+    this.onGameErrorBound = this.handleGameError.bind(this);
   }
 
   getStatus() {
@@ -86,6 +88,8 @@ class RouteRunner {
     this.state.history = [];
 
     this.account.on('capture', this.onCaptureBound);
+    this.account.on('field-none', this.onFieldNoneBound);
+    this.account.on('game-error', this.onGameErrorBound);
 
     this.log(`🚀 Rota Automática iniciada com ${this.state.queue.length} Pokémon! Hunt de retorno: ${origName}.`);
 
@@ -126,6 +130,8 @@ class RouteRunner {
     this.state.running = false;
     this.state.paused = false;
     this.account.off('capture', this.onCaptureBound);
+    this.account.off('field-none', this.onFieldNoneBound);
+    this.account.off('game-error', this.onGameErrorBound);
     clearInterval(this.timer);
 
     if (returnHome && this.state.returnHome && this.state.originalHunt) {
@@ -194,6 +200,29 @@ class RouteRunner {
     }
   }
 
+  handleFieldNone(message) {
+    if (!this.state.running || this.state.paused) return;
+    const target = this.getCurrentTarget();
+    if (!target) return;
+    if (!message?.slug || message.slug === target.slug) {
+      this.log(`⚠️ Hunt indisponível no servidor: ${target.name} [slug: ${target.slug}]. Pulando para o próximo alvo…`);
+      target.status = 'skipped';
+      this.advanceNext();
+    }
+  }
+
+  handleGameError(message) {
+    if (!this.state.running || this.state.paused) return;
+    const target = this.getCurrentTarget();
+    if (!target) return;
+    const msg = String(message?.message || '');
+    if (msg.includes('nível') || msg.includes('caçar') || msg.includes('bloqueada')) {
+      this.log(`⚠️ Hunt bloqueada para este nível: "${msg}". Pulando ${target.name}…`);
+      target.status = 'skipped';
+      this.advanceNext();
+    }
+  }
+
   advanceNext() {
     this.state.currentIndex++;
     if (this.state.currentIndex >= this.state.queue.length) {
@@ -207,6 +236,8 @@ class RouteRunner {
     this.state.running = false;
     this.state.paused = false;
     this.account.off('capture', this.onCaptureBound);
+    this.account.off('field-none', this.onFieldNoneBound);
+    this.account.off('game-error', this.onGameErrorBound);
     clearInterval(this.timer);
 
     const totalMin = Math.max(1, Math.round((Date.now() - this.state.startedAt) / 60000));
@@ -271,28 +302,28 @@ function buildPresetRoutes(allCreatures, ownedSpeciesSet = new Set()) {
   // Presets
   const presets = [
     {
+      id: 'unowned_kanto',
+      title: '👑 Kanto: Não Capturados (Até Lv 499)',
+      description: 'Apenas Pokémon da região de Kanto (Gen 1, #1 a #151) até nível 499 que você ainda NÃO TEM na coleção (100% com hunt garantida).',
+      filter: c => c.pokeId >= 1 && c.pokeId <= 151 && c.huntLevel != null && c.huntLevel <= 499 && !c.area && !ownedSpeciesSet.has(c.pokeId)
+    },
+    {
+      id: 'unowned_kanto_30',
+      title: '🌱 Kanto Speedrun: Não Capturados (Lv 1 a 30)',
+      description: 'Pokémon de Kanto até nível 30 que faltam na sua Pokédex (iniciais e monstros fáceis).',
+      filter: c => c.pokeId >= 1 && c.pokeId <= 151 && c.huntLevel != null && c.huntLevel <= 30 && !c.area && !ownedSpeciesSet.has(c.pokeId)
+    },
+    {
+      id: 'unowned_kanto_80',
+      title: '⚡ Kanto Intermediário: Não Capturados (Lv 1 a 80)',
+      description: 'Pokémon de Kanto até nível 80 que faltam na sua coleção.',
+      filter: c => c.pokeId >= 1 && c.pokeId <= 151 && c.huntLevel != null && c.huntLevel <= 80 && !c.area && !ownedSpeciesSet.has(c.pokeId)
+    },
+    {
       id: 'unowned_lvl499',
-      title: '👑 Não Capturados (Até Lv 499)',
-      description: 'Todos os Pokémon disponíveis até nível 499 que você ainda NÃO TEM na coleção (ordem crescente de nível).',
+      title: '🌐 Global: Todos Não Capturados (Até Lv 499)',
+      description: 'Todas as regiões combinadas até nível 499 que você ainda NÃO TEM na coleção.',
       filter: c => c.huntLevel != null && c.huntLevel <= 499 && !c.area && !ownedSpeciesSet.has(c.pokeId)
-    },
-    {
-      id: 'unowned_lvl20',
-      title: '✨ Speedrun: Não Capturados (Lv 1 a 20)',
-      description: 'Todos os Pokémon até nível 20 que você AINDA NÃO TEM na coleção.',
-      filter: c => c.huntLevel != null && c.huntLevel <= 20 && !c.area && !ownedSpeciesSet.has(c.pokeId)
-    },
-    {
-      id: 'unowned_lvl30',
-      title: '🚀 Pokédex Master: Não Capturados (Lv 1 a 30)',
-      description: 'Todos os Pokémon até nível 30 que faltam na sua Pokédex, ordenados por nível.',
-      filter: c => c.huntLevel != null && c.huntLevel <= 30 && !c.area && !ownedSpeciesSet.has(c.pokeId)
-    },
-    {
-      id: 'unowned_lvl100',
-      title: '⚡ Avançado: Não Capturados (Lv 1 a 100)',
-      description: 'Todos os Pokémon até nível 100 que faltam na sua Pokédex, ordenados por nível.',
-      filter: c => c.huntLevel != null && c.huntLevel <= 100 && !c.area && !ownedSpeciesSet.has(c.pokeId)
     },
     {
       id: 'kanto_lvl1',
