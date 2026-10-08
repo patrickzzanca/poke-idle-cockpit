@@ -1,21 +1,25 @@
 // ==UserScript==
 // @name         PIW Cockpit — ponte e tags
 // @namespace    pk-ext
-// @version      1.1.0
+// @version      1.2.0
 // @description  Liga as abas do Poke Idle World ao cockpit local (localhost:8787) e mostra as tags unificadas nos cards.
 // @match        https://poke.idleworld.online/*
+// @updateURL    https://raw.githubusercontent.com/patrickzzanca/poke-idle-cockpit/main/userscript/piw.user.js
+// @downloadURL  https://raw.githubusercontent.com/patrickzzanca/poke-idle-cockpit/main/userscript/piw.user.js
 // @run-at       document-start
 // @grant        GM_xmlhttpRequest
 // @grant        unsafeWindow
 // @connect      localhost
-// @require      http://localhost:8787/shared/species.js
-// @require      http://localhost:8787/shared/classifier.js
+// @connect      127.0.0.1
+// @connect      *
+// @require      https://raw.githubusercontent.com/patrickzzanca/poke-idle-cockpit/main/shared/species.js
+// @require      https://raw.githubusercontent.com/patrickzzanca/poke-idle-cockpit/main/shared/classifier.js
 // ==/UserScript==
 
 (() => {
   'use strict';
 
-  const COCKPIT = 'http://localhost:8787';
+  let COCKPIT = localStorage.getItem('piw:cockpit_url') || 'http://localhost:8787';
   const page = unsafeWindow;
   const store = page.sessionStorage;
   const TOKENS_KEY = 'pokeweb:tokens';
@@ -64,16 +68,20 @@
     return;
   }
 
-  function heartbeat() {
+  let lastHeartbeatSent = 0;
+  function heartbeat(force = false) {
     const accountId = store.getItem(ACCOUNT_KEY);
     const tokens = readTokens();
     if (!accountId || !tokens) return;
+    const now = Date.now();
+    if (!force && now - lastHeartbeatSent < 1000) return;
+    lastHeartbeatSent = now;
     cockpit('POST', '/api/bridge/heartbeat', { accountId, tokens, cmid: machineId, lastHunt: currentHunt }).catch(error => {
       if (error.status === 404) { store.removeItem(ACCOUNT_KEY); renderBridgeButton(); }
     });
   }
-  setInterval(heartbeat, 30000);
-  setTimeout(heartbeat, 3000);
+  setInterval(() => heartbeat(false), 30000);
+  setTimeout(() => heartbeat(true), 3000);
   page.addEventListener('pagehide', () => {
     const accountId = store.getItem(ACCOUNT_KEY);
     if (accountId && location.pathname.startsWith('/play')) cockpit('POST', '/api/bridge/release', { accountId, lastHunt: currentHunt }).catch(() => {});
@@ -89,7 +97,16 @@
       button.id = 'piw-bridge';
       button.type = 'button';
       document.body.append(button);
-      button.addEventListener('click', async () => {
+      button.addEventListener('click', async (e) => {
+        if (e.shiftKey || e.altKey) {
+          const newUrl = prompt('URL do Cockpit (ex: http://192.168.1.100:8787 ou http://localhost:8787):', COCKPIT);
+          if (newUrl) {
+            COCKPIT = newUrl.trim().replace(/\/+$/, '');
+            localStorage.setItem('piw:cockpit_url', COCKPIT);
+            alert(`Cockpit configurado para: ${COCKPIT}`);
+          }
+          return;
+        }
         if (store.getItem(ACCOUNT_KEY)) return window.open(COCKPIT, 'piw-cockpit');
         button.disabled = true;
         try {
@@ -97,7 +114,7 @@
           store.setItem(ACCOUNT_KEY, result.id);
           renderBridgeButton();
         } catch (error) {
-          alert(`PIW Cockpit: ${error.message}`);
+          alert(`PIW Cockpit: ${error.message}\n(Dica: Shift+Clique ou Alt+Clique neste botão para definir o IP/URL do Cockpit)`);
         } finally {
           button.disabled = false;
         }
@@ -147,7 +164,7 @@
           const msg = JSON.parse(data);
           if (msg?.type === 'enter-hunt' && msg.slug) {
             currentHunt = String(msg.slug);
-            heartbeat();
+            heartbeat(true);
           }
         } catch { /* parse error */ }
       }
@@ -159,6 +176,7 @@
           const msg = JSON.parse(event.data);
           if ((msg?.type === 'field-init' || msg?.type === 'hunt-resume') && msg.slug) {
             currentHunt = String(msg.slug);
+            heartbeat(true);
           }
         } catch { /* parse error */ }
       }
