@@ -33,9 +33,11 @@ function createStore(dir) {
 
   const wishlistFile = path.join(dir, 'wishlist.json');
   const tickersFile = path.join(dir, 'tickers_history.json');
+  const presetsFile = path.join(dir, 'presets.json');
   let accounts = readJson(accountsFile, { accounts: [] }).accounts ?? [];
   let cmid = readJson(machineFile, {}).cmid ?? null;
   let wishlist = readJson(wishlistFile, { wishlist: [] }).wishlist ?? [];
+  let customPresets = readJson(presetsFile, { presets: [] }).presets ?? [];
   let tickers = readJson(tickersFile, { diamonds: [], pheromones: [] });
   if (!Array.isArray(tickers.diamonds)) tickers.diamonds = [];
   if (!Array.isArray(tickers.pheromones)) tickers.pheromones = [];
@@ -91,6 +93,20 @@ function createStore(dir) {
       tickers[type].push(snapshot);
       if (tickers[type].length > 60) tickers[type] = tickers[type].slice(-60);
       writeJson(tickersFile, tickers);
+    },
+    getCustomPresets: () => customPresets.map(p => ({ ...p })),
+    saveCustomPreset(preset) {
+      const id = preset.id || `preset_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+      const entry = { ...preset, id, updatedAt: Date.now() };
+      const idx = customPresets.findIndex(p => p.id === id);
+      if (idx >= 0) customPresets[idx] = entry;
+      else customPresets.push(entry);
+      writeJson(presetsFile, { presets: customPresets });
+      return entry;
+    },
+    deleteCustomPreset(id) {
+      customPresets = customPresets.filter(p => p.id !== id);
+      writeJson(presetsFile, { presets: customPresets });
     }
   };
 }

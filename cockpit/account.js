@@ -335,7 +335,8 @@ class Account extends EventEmitter {
         if (Array.isArray(message.mobs)) {
           const currentSlots = new Set();
           for (const mob of message.mobs) {
-            if (mob && mob.shiny && !mob.dead && !mob.respawning) {
+            const isMobShiny = mob && (mob.shiny || mob.isShiny || mob.rarity === 'shiny' || (mob.name && /shiny|✨/i.test(mob.name)));
+            if (isMobShiny && !mob.dead && !mob.respawning) {
               const key = `${mob.slot}:${mob.speciesId}`;
               currentSlots.add(key);
               if (!this.activeShinies.has(key)) {
@@ -372,7 +373,15 @@ class Account extends EventEmitter {
             this.emit('inventory', this.inventory);
           }
         }
-        if (message.shiny) {
+        const isShinyKill = Boolean(
+          message.shiny || message.isShiny || message.rarity === 'shiny' ||
+          (message.speciesName && /shiny|✨/i.test(message.speciesName)) ||
+          [...this.activeShinies].some(k => k.endsWith(`:${message.speciesId}`))
+        );
+        if (isShinyKill) {
+          for (const key of this.activeShinies) {
+            if (key.endsWith(`:${message.speciesId}`)) this.activeShinies.delete(key);
+          }
           this.emit('shiny-encounter', {
             type: 'kill',
             at: Date.now(),
@@ -429,6 +438,74 @@ class Account extends EventEmitter {
     else if (changed || !this.state.hunt) this.setState({ hunt: slug });
   }
 
+  applyTelemetry(t) {
+    if (!t || typeof t !== 'object') return;
+    if (this.state.status !== 'handedOff') {
+      this.setState({ status: 'handedOff', error: null });
+    }
+    if (t.lastHunt) {
+      this.setHunt(t.lastHunt, t.huntName);
+    }
+    if (t.lastKillAt) {
+      this.setState({ lastKillAt: Number(t.lastKillAt) || Date.now() });
+    }
+    if (t.analyzer) {
+      const a = t.analyzer;
+      const seconds = Number(a.seconds) || 0;
+      const profit = Number(a.profit ?? a.balance ?? 0);
+      this.setState({
+        analyzer: {
+          seconds,
+          kills: a.kills ?? 0,
+          killsPerHour: a.killsPerHour ?? 0,
+          xpGained: a.xpGained ?? 0,
+          xpPerHour: a.xpPerHour ?? 0,
+          captures: a.captures ?? 0,
+          shinyCaptures: a.shinyCaptures ?? 0,
+          lootGold: a.lootGold ?? 0,
+          supplyGold: a.supplyGold ?? 0,
+          ballsUsed: a.ballsUsed ?? 0,
+          potionsUsed: a.potionsUsed ?? 0,
+          profit,
+          profitPerHour: a.profitPerHour ?? (seconds > 0 ? Math.round(profit / seconds * 3600) : 0)
+        }
+      });
+    }
+    if (Array.isArray(t.pokes)) {
+      this.applyPokes(t.pokes);
+    } else if (t.pokeDelta) {
+      this.applyDelta(t.pokeDelta);
+    }
+    if (t.balls) {
+      this.balls = {
+        catalog: Array.isArray(t.balls.catalog) ? t.balls.catalog : (this.balls?.catalog ?? []),
+        counts: t.balls.counts ?? this.balls?.counts ?? {}
+      };
+      this.emit('balls', this.balls);
+    }
+    if (Array.isArray(t.inventory)) {
+      this.inventory = t.inventory;
+      this.emit('inventory', this.inventory);
+    }
+    if (Array.isArray(t.shinies)) {
+      for (const s of t.shinies) {
+        if (!s) continue;
+        const key = `${s.slot ?? '0'}_${s.speciesId ?? '0'}_${s.type ?? 'spawn'}`;
+        if (!this.activeShinies.has(key)) {
+          this.activeShinies.add(key);
+          this.emit('shiny-encounter', {
+            type: s.type || 'spawn',
+            at: s.at || Date.now(),
+            speciesId: s.speciesId,
+            speciesName: s.speciesName,
+            slot: s.slot
+          });
+          this.log(`✨ SHINY DETECTADO NO NAVEGADOR: ${s.speciesName ?? s.speciesId}!`);
+        }
+      }
+    }
+  }
+
   applyPokes(list) {
     const previous = this.pokes;
     this.pokes = list;
@@ -469,7 +546,8 @@ class Account extends EventEmitter {
     if (leader) {
       this.lastLeader = {
         name: leader.name, level: leader.level, quality: leader.quality, ivTotal: leader.ivTotal,
-        speciesId: leader.speciesId ?? leader.pokeId ?? null, shiny: Boolean(leader.shiny),
+        speciesId: leader.speciesId ?? leader.pokeId ?? null,
+        shiny: Boolean(leader.shiny || leader.isShiny || leader.rarity === 'shiny' || (leader.name && /shiny|✨/i.test(leader.name))),
         hp: leader.hp ?? null, maxHp: leader.maxHp ?? null,
         power: leader.power ?? null,
         ivs: leader.ivs ?? null

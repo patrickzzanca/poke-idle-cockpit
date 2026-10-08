@@ -22,9 +22,10 @@
       <button data-tab="contas" class="nav-pill active">Contas</button>
       <button data-tab="colecao" class="nav-pill">Coleção</button>
       <button data-tab="destaques" class="nav-pill">Destaques</button>
-      <button data-tab="mercado" class="nav-pill">Mercado</button>
+      <!-- <button data-tab="mercado" class="nav-pill">Mercado</button> -->
       <button data-tab="bag" class="nav-pill" id="tab-pill-bag">🎒 Bag & Venda</button>
       <button data-tab="rota" class="nav-pill" id="tab-pill-rota">🧭 Rota Automática <span id="route-badge" class="counter-badge hidden">Ativa</span></button>
+      <button data-tab="breeder" class="nav-pill" id="tab-pill-breeder">🧬 Breeder</button>
       <button data-tab="radar" class="nav-pill" id="tab-pill-radar">🎯 Radar <span id="radar-badge" class="counter-badge hidden">0</span></button>
     </nav>
     <div class="top-actions">
@@ -84,7 +85,7 @@
         <label>Tipo <select id="col-type"><option value="">Todos</option></select></label>
         <label>Busca <input id="col-text" placeholder="Nome do Pokémon"></label>
         <div class="view-switch">
-          <button type="button" id="col-view-grid" class="view-btn on" title="Modo Grid / Pokédex">🎴 Pokédex</button>
+          <button type="button" id="col-view-grid" class="view-btn on" title="Modo Cards">🎴 Cards</button>
           <button type="button" id="col-view-table" class="view-btn" title="Modo Tabela">📄 Tabela</button>
         </div>
         <div class="select-actions">
@@ -121,7 +122,8 @@
     </section>
 
     <!-- TAB 4: MERCADO -->
-    <section id="tab-mercado" class="tab" hidden>
+    <!-- TAB 4: MERCADO (DESATIVADO) -->
+    <section id="tab-mercado" class="tab" hidden style="display:none">
       <datalist id="species-datalist"></datalist>
 
       <!-- Banner de Cotações & Commodities -->
@@ -343,6 +345,16 @@
               <option value="0">Desativado</option>
             </select>
           </div>
+          <div class="param-group">
+            <label>Kills por Espécie (Opcional):</label>
+            <select id="route-target-kills">
+              <option value="0" selected>Apenas por Capturas</option>
+              <option value="25">25 kills</option>
+              <option value="50">50 kills</option>
+              <option value="100">100 kills</option>
+              <option value="200">200 kills</option>
+            </select>
+          </div>
           <div class="param-group checkbox-group">
             <label class="checkbox-label">
               <input type="checkbox" id="route-return-home" checked>
@@ -355,6 +367,21 @@
             <button type="button" id="route-btn-resume" class="btn-hardware-action" hidden>▶️ Continuar</button>
             <button type="button" id="route-btn-skip" class="btn-hardware-subtle" hidden title="Pular Pokémon atual">⏭️ Pular Atual</button>
             <button type="button" id="route-btn-stop" class="btn-crimson" hidden>⏹️ Parar Rota</button>
+          </div>
+        </div>
+
+        <!-- Barra de Presets Customizados Salvos -->
+        <div class="route-presets-manager-bar">
+          <div class="preset-load-group">
+            <label class="muted text-xs bold">PRESETS SALVOS:</label>
+            <select id="route-saved-presets"><option value="">-- Selecione um preset salvo --</option></select>
+            <button type="button" id="route-load-preset-btn" class="btn-hardware-subtle small">📂 Carregar</button>
+            <button type="button" id="route-delete-preset-btn" class="btn-crimson small" title="Excluir preset selecionado">🗑️</button>
+          </div>
+          <div class="preset-action-group">
+            <button type="button" id="route-save-preset-btn" class="btn-hardware-subtle small" title="Salvar fila e metas atuais como um preset salvo">💾 Salvar Fila Atual</button>
+            <button type="button" id="route-export-preset-btn" class="btn-hardware-subtle small" title="Exportar fila como JSON">📤 Exportar JSON</button>
+            <button type="button" id="route-import-preset-btn" class="btn-hardware-subtle small" title="Importar fila a partir de JSON">📥 Importar JSON</button>
           </div>
         </div>
       </div>
@@ -390,11 +417,183 @@
             <h2>📋 Fila de Pokémon da Rota</h2>
             <span id="route-queue-count" class="counter-badge">0 na fila</span>
           </div>
-          <div class="queue-header-actions">
+          <div class="queue-builder-controls">
+            <div class="search-input-group">
+              <input id="route-add-search" list="species-datalist" placeholder="Buscar Pokémon (ex: Charmander)...">
+              <button type="button" id="route-add-poke-btn" class="btn-hardware-action small">+ Adicionar</button>
+            </div>
             <button type="button" id="route-clear-queue-btn" class="btn-hardware-subtle small">🗑️ Limpar Fila</button>
           </div>
         </div>
         <div id="route-queue-list" class="route-queue-grid"></div>
+      </div>
+    </section>
+
+    <!-- TAB 8: CALCULADORA & SIMULADOR DE BREEDER (PIW COMPLIANT) -->
+    <section id="tab-breeder" class="tab" hidden>
+      <!-- Header com Métricas e Seleção de Conta -->
+      <div class="breeder-header-card hardware-card">
+        <div class="breeder-top-controls">
+          <label>Conta: <select id="breeder-account"></select></label>
+          <button type="button" id="breeder-btn-refresh" class="btn-hardware-action small">🔄 Atualizar Coleção & Pares</button>
+          <span class="breeder-info-pill" title="Regras oficiais do Poke Idle World: mesma espécie, diferença de Quality máxima de 0.150, IV herdado do pai com maior Quality.">ℹ️ Regras Oficiais do PIW</span>
+        </div>
+        <div class="breeder-metrics-row">
+          <div class="metric-card">
+            <div class="metric-label">Pares Compatíveis Prontos</div>
+            <div class="metric-value pos" id="breeder-m-pairs">0</div>
+            <div class="metric-sub">Mesma espécie & Δ Q ≤ 0.150</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-label">Matrizes de Elite (IV ≥ 150)</div>
+            <div class="metric-value info" id="breeder-m-matrizes">0</div>
+            <div class="metric-sub">Prontos para passar distribuição de IV</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-label">Reprodutores Alta Quality (Q ≥ 1.60)</div>
+            <div class="metric-value warn" id="breeder-m-highq">0</div>
+            <div class="metric-sub">Elevam a qualidade do filhote</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-label">Quase Compatíveis</div>
+            <div class="metric-value" id="breeder-m-near" style="color:var(--accent-amber);">0</div>
+            <div class="metric-sub">Δ Q entre 0.151 e 0.350 (precisam de ponte)</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- BANCADA DO SIMULADOR DE BREEDING (SLOT 1 + SLOT 2) -->
+      <div class="hardware-card breeder-simulator-card" style="margin-top:1.2rem;">
+        <div class="panel-header-row">
+          <div class="panel-title-with-badge">
+            <h2>🧪 Simulador de Bancada (Creche / Daycare)</h2>
+            <span class="counter-badge" id="breeder-sim-status-badge">Aguardando seleção</span>
+          </div>
+          <div class="breeder-sim-quick-actions">
+            <button type="button" id="breeder-swap-parents-btn" class="btn-hardware-subtle small" title="Inverte Slot 1 e Slot 2">⇄ Inverter Pais</button>
+            <button type="button" id="breeder-clear-sim-btn" class="btn-hardware-subtle small">Limpar Bancada</button>
+          </div>
+        </div>
+
+        <div class="breeder-workbench-grid">
+          <!-- PARENT SLOT 1 -->
+          <div class="breeder-slot-card" id="breeder-slot1-card">
+            <div class="slot-header">
+              <span class="slot-badge">Slot 1 (Pai A)</span>
+              <select id="breeder-select-p1" class="breeder-poke-select">
+                <option value="">Selecione um Pokémon da conta...</option>
+              </select>
+            </div>
+            <div class="slot-body" id="breeder-slot1-display">
+              <div class="slot-placeholder">Escolha um Pokémon no seletor acima</div>
+            </div>
+          </div>
+
+          <!-- CONNECTOR & STATUS -->
+          <div class="breeder-connector-box">
+            <div class="breeder-heart-icon" id="breeder-connector-heart">🧬</div>
+            <div class="breeder-diff-badge" id="breeder-diff-display">Δ Q: —</div>
+            <div class="breeder-compat-badge" id="breeder-compat-status">Selecione 2 Pokémon</div>
+          </div>
+
+          <!-- PARENT SLOT 2 -->
+          <div class="breeder-slot-card" id="breeder-slot2-card">
+            <div class="slot-header">
+              <span class="slot-badge">Slot 2 (Pai B)</span>
+              <select id="breeder-select-p2" class="breeder-poke-select">
+                <option value="">Selecione um Pokémon da conta...</option>
+              </select>
+            </div>
+            <div class="slot-body" id="breeder-slot2-display">
+              <div class="slot-placeholder">Escolha um parceiro da mesma espécie</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- CONFIGURAÇÕES DE CRUZA (MODO & DOUBLE STONES) -->
+        <div class="breeder-config-strip">
+          <div class="breeder-mode-radios">
+            <label class="mode-radio-label">
+              <input type="radio" name="breed-mode" value="free" checked>
+              <span class="mode-radio-text">
+                <strong>🌱 Free Breeding (Grátis)</strong>
+                <small>R$ 2M + 20 Stones · 0 Pheromones · Ganho de +0.005 a +0.040 Q</small>
+              </span>
+            </label>
+            <label class="mode-radio-label">
+              <input type="radio" name="breed-mode" value="pheromone">
+              <span class="mode-radio-text">
+                <strong>🧪 Strange Pheromones (Feromônio)</strong>
+                <small>R$ 2M + 20 Stones + 9 Pheromones · Ganho de +0.150 a +0.300 Q</small>
+              </span>
+            </label>
+          </div>
+          <div class="breeder-option-toggle">
+            <label class="checkbox-label" title="Gasta 40 Evolution Stones no total e dá 5% de chance de aumentar +1 ponto de IV aleatório em stats abaixo de 32">
+              <input type="checkbox" id="breed-double-stones">
+              <span><strong>💎 Double Stones</strong> (40 Stones · 5% de chance de +1 IV aleatório)</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- PAINEL DE RESULTADOS PROJETADOS -->
+        <div id="breeder-results-panel" class="breeder-results-panel" style="display:none;">
+          <div class="results-header-row">
+            <h3>🐣 Projeção Oficial do Filhote (Ovo)</h3>
+            <span class="results-sub" id="breeder-results-sub">—</span>
+          </div>
+
+          <div class="breeder-results-grid">
+            <!-- IV INHERITANCE CARD -->
+            <div class="res-card iv-heritage-card">
+              <div class="res-card-title">🧬 Herança de IVs (100% de um pai)</div>
+              <div id="breeder-iv-heritage-info" class="heritage-info-box"></div>
+              <div id="breeder-inherited-stats-grid" class="inherited-stats-grid"></div>
+              <div id="breeder-heritage-warning" class="heritage-warning-box"></div>
+            </div>
+
+            <!-- QUALITY PROJECTION & SCENARIOS -->
+            <div class="res-card quality-projection-card">
+              <div class="res-card-title">📈 Projeção de Quality (Teto: 2.600)</div>
+              <div class="quality-summary-badges">
+                <div class="q-badge-box"><span class="q-label">Mínimo</span><strong id="breeder-res-qmin" class="mono text-cyan">1.000</strong></div>
+                <div class="q-badge-box"><span class="q-label">Esperado</span><strong id="breeder-res-qexp" class="mono text-amber">1.000</strong></div>
+                <div class="q-badge-box"><span class="q-label">Máximo</span><strong id="breeder-res-qmax" class="mono text-green">1.000</strong></div>
+              </div>
+              <div class="scenarios-table-wrap">
+                <table class="hardware-table small-table" id="breeder-scenarios-table">
+                  <thead>
+                    <tr><th>Cenário</th><th>Probabilidade</th><th>Bônus Quality</th><th>Quality Final</th><th>Status</th></tr>
+                  </thead>
+                  <tbody id="breeder-scenarios-tbody"></tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- COSTS & EXTRAS -->
+            <div class="res-card costs-card">
+              <div class="res-card-title">💰 Custos & Probabilidades</div>
+              <div class="costs-list" id="breeder-costs-list"></div>
+              <div class="shiny-chance-box" id="breeder-shiny-chance-box"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- PAINEL DE PARES RECOMENDADOS DA COLEÇÃO -->
+      <div class="panel hardware-card" style="margin-top:1.2rem">
+        <div class="panel-header-row">
+          <div class="panel-title-with-badge">
+            <h2 id="breeder-view-title">🧬 Pares Compatíveis na Sua Coleção</h2>
+            <span id="breeder-pairs-count" class="counter-badge">0 encontrados</span>
+          </div>
+          <div class="breeder-subtabs" id="breeder-subtabs">
+            <button type="button" class="pill-filter active" data-bview="ready">✅ Pares Prontos (Compatíveis)</button>
+            <button type="button" class="pill-filter" data-bview="near">⚠️ Quase Compatíveis (Δ Q > 0.150)</button>
+            <button type="button" class="pill-filter" data-bview="solo">💎 Matrizes Solitárias</button>
+          </div>
+        </div>
+        <div id="breeder-content-list" class="breeder-grid"></div>
       </div>
     </section>
   </main>
@@ -571,6 +770,16 @@
       <div class="dlg-actions">
         <button value="cancel" class="btn-hardware-subtle">Cancelar</button>
         <button id="sell-confirm" class="btn-crimson" value="default">Vender</button>
+      </div>
+    </form>
+  <dialog id="dlg-route-io">
+    <form method="dialog" class="dlg">
+      <h2 id="route-io-title">📤 Exportar / Importar Rota</h2>
+      <p class="muted text-xs" id="route-io-desc">Copie o JSON abaixo para salvar ou cole um JSON para carregar a rota.</p>
+      <textarea id="route-io-json" rows="9" style="width:100%;font-family:monospace;font-size:11px;background:var(--surface-sunken);color:var(--text-main);padding:8px;border-radius:6px;border:1px solid var(--border-subtle);"></textarea>
+      <div class="dlg-actions">
+        <button value="cancel" class="btn-hardware-subtle">Fechar</button>
+        <button type="button" id="route-io-submit" class="btn-hardware-action">Aplicar Rota</button>
       </div>
     </form>
   </dialog>

@@ -14,6 +14,7 @@ const { buildSpeciesIndex } = require('../shared/species.js');
 const { classifyCollection } = require('../shared/classifier.js');
 const { DiscordNotifier } = require('./discord.js');
 const { RouteRunner, buildPresetRoutes } = require('./route-runner.js');
+const { calculateBreederMatchups } = require('./breeder.js');
 
 const PORT = Number(process.env.PIW_PORT) || 8787;
 const HOST = process.env.PIW_HOST || '0.0.0.0';
@@ -753,6 +754,23 @@ function createApp({ store, api, species, itemsCatalog }) {
       account.updateTokens(body.tokens);
       if (body.lastHunt) account.setHunt(body.lastHunt);
       if (account.state.status === 'replaced') account.handOff();
+      if (body.telemetry && typeof account.applyTelemetry === 'function') {
+        account.applyTelemetry(body.telemetry);
+      }
+      return sendJson(res, 200, { ok: true, status: account.state.status });
+    }
+    if (req.method === 'POST' && p === '/api/bridge/telemetry') {
+      const body = await readBody(req);
+      rememberCmid(body.cmid);
+      const account = getAccount(body.accountId);
+      heartbeats.set(account.id, Date.now());
+      if (body.tokens) account.updateTokens(body.tokens);
+      if (account.state.status === 'replaced' || account.state.status === 'online') {
+        account.handOff();
+      }
+      if (typeof account.applyTelemetry === 'function') {
+        account.applyTelemetry(body.telemetry);
+      }
       return sendJson(res, 200, { ok: true, status: account.state.status });
     }
     if (req.method === 'POST' && p === '/api/bridge/release') {
@@ -770,19 +788,21 @@ function createApp({ store, api, species, itemsCatalog }) {
     const url = new URL(req.url, `http://localhost:${PORT}`);
     const p = url.pathname;
 
-    if (req.method === 'GET' && STATIC[p]) {
+    if ((req.method === 'GET' || req.method === 'HEAD') && STATIC[p]) {
       const [file, type] = STATIC[p];
       res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-store' });
+      if (req.method === 'HEAD') return res.end();
       return fs.createReadStream(path.join(__dirname, file)).pipe(res);
     }
 
-    if (req.method === 'GET' && p === '/piw.user.js') {
+    if ((req.method === 'GET' || req.method === 'HEAD') && p === '/piw.user.js') {
       const host = req.headers.host || `localhost:${PORT}`;
       const scriptPath = path.join(__dirname, '../userscript/piw.user.js');
       let content = fs.readFileSync(scriptPath, 'utf8');
       content = content.replace(/http:\/\/localhost:8787/g, `http://${host}`);
       content = content.replace(/\/\/ @connect\s+localhost/, `// @connect      localhost\n// @connect      ${host.split(':')[0]}`);
       res.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-store' });
+      if (req.method === 'HEAD') return res.end();
       return res.end(content);
     }
 
@@ -793,7 +813,7 @@ function createApp({ store, api, species, itemsCatalog }) {
 
     const origin = req.headers.origin;
     if (origin && !isAllowedOrigin(origin)) throw httpError(403, 'Origem não permitida.');
-    if (req.method !== 'GET' && !origin) throw httpError(403, 'Origem ausente.');
+    if (req.method !== 'GET' && req.method !== 'HEAD' && !origin) throw httpError(403, 'Origem ausente.');
 
     if (p === '/events') {
       res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
@@ -826,6 +846,19 @@ function createApp({ store, api, species, itemsCatalog }) {
       return sendJson(res, 200, {
         presets: buildPresetRoutes(species.all ? species.all() : [], ownedSpeciesSet)
       });
+    }
+    if (req.method === 'GET' && p === '/api/routes/custom') {
+      return sendJson(res, 200, { presets: store.getCustomPresets() });
+    }
+    if (req.method === 'POST' && p === '/api/routes/custom') {
+      const body = await readBody(req);
+      const saved = store.saveCustomPreset(body);
+      return sendJson(res, 200, { ok: true, preset: saved });
+    }
+    if (req.method === 'DELETE' && p.startsWith('/api/routes/custom/')) {
+      const presetId = p.slice('/api/routes/custom/'.length);
+      store.deleteCustomPreset(presetId);
+      return sendJson(res, 200, { ok: true });
     }
     if (req.method === 'GET' && p === '/api/species') {
       return sendJson(res, 200, {
@@ -888,6 +921,14 @@ function createApp({ store, api, species, itemsCatalog }) {
       return sendJson(res, 200, { ok: true });
     }
     if (req.method === 'GET' && action === 'pokes') return sendJson(res, 200, { pokes: collectionView(account) });
+    if (req.method === 'GET' && action === 'breeder') {
+      return sendJson(res, 200, calculateBreederMatchups({
+        collection: account.pokes ?? [],
+        species,
+        minMatrizIv: Number(store.config.tags?.matrizIv) || 150,
+        minGoodQuality: 1.60
+      }));
+    }
     if (req.method === 'GET' && action === 'bag') {
       const fresh = url.searchParams.get('fresh') === '1' || url.searchParams.get('force') === '1';
       return sendJson(res, 200, await getAccountBag(account, fresh));

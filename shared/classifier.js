@@ -42,7 +42,7 @@
       ivTotal,
       power: num(raw.power),
       sellValue: num(raw.sellValue),
-      shiny: Boolean(raw.shiny),
+      shiny: Boolean(raw.shiny || raw.isShiny || raw.rarity === 'shiny' || (raw.name && /shiny|✨/i.test(raw.name))),
       isDitto: Boolean(raw.isDitto),
       team: Boolean(raw.team),
       starter: Boolean(raw.starter),

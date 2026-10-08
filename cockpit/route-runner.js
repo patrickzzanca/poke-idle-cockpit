@@ -58,7 +58,7 @@ class RouteRunner {
     };
   }
 
-  start({ queue, route, targetCaptures, targetPerPoke, maxTimeSec, timeoutSec, noKillTimeoutSec, maxTimeWithoutKillSec, returnHome = true }) {
+  start({ queue, route, targetCaptures, targetPerPoke, targetKills, maxTimeSec, timeoutSec, noKillTimeoutSec, maxTimeWithoutKillSec, returnHome = true }) {
     const list = Array.isArray(queue) && queue.length ? queue : (Array.isArray(route) ? route : []);
     if (!list.length) {
       throw new Error('A rota precisa ter pelo menos 1 Pokémon.');
@@ -70,6 +70,7 @@ class RouteRunner {
 
     const rawNoKill = noKillTimeoutSec !== undefined ? noKillTimeoutSec : maxTimeWithoutKillSec;
     const resolvedNoKill = rawNoKill !== undefined ? Math.max(0, Number(rawNoKill) || 0) : 60;
+    const resolvedTargetKills = Number(targetKills) > 0 ? Number(targetKills) : 0;
 
     this.state.running = true;
     this.state.paused = false;
@@ -77,6 +78,7 @@ class RouteRunner {
     this.state.originalHunt = origSlug;
     this.state.originalHuntName = origName;
     this.state.targetCapturesPerSpecies = Math.max(1, Number(targetCaptures ?? targetPerPoke) || 1);
+    this.state.targetKillsPerSpecies = resolvedTargetKills;
     this.state.maxTimePerHuntSec = Math.max(60, Number(maxTimeSec ?? timeoutSec) || 300);
     this.state.maxTimeWithoutKillSec = resolvedNoKill;
     this.state.returnHome = Boolean(returnHome);
@@ -88,7 +90,9 @@ class RouteRunner {
       level: q.level || q.huntLevel || 1,
       types: q.types || (q.type1 ? [q.type1, q.type2].filter(Boolean) : []),
       captures: 0,
-      target: this.state.targetCapturesPerSpecies,
+      kills: 0,
+      target: Number(q.target || q.targetCaptures) || this.state.targetCapturesPerSpecies,
+      targetKills: Number(q.targetKills) || resolvedTargetKills,
       status: 'pending'
     }));
     this.state.currentIndex = 0;
@@ -182,6 +186,22 @@ class RouteRunner {
     if (!this.state.running || this.state.paused) return;
     this.state.currentHuntKills++;
     this.state.lastKillInHuntAt = Date.now();
+    const target = this.getCurrentTarget();
+    if (!target) return;
+
+    if (target.targetKills > 0 && this.state.currentHuntKills >= target.targetKills) {
+      target.status = 'completed';
+      this.log(`⚔️ [${this.state.currentIndex + 1}/${this.state.queue.length}] Meta de kills atingida: ${target.name} (${this.state.currentHuntKills}/${target.targetKills} kills)!`);
+      this.state.history.push({
+        speciesId: target.speciesId,
+        name: target.name,
+        slug: target.slug,
+        captures: this.state.currentCaptures,
+        kills: this.state.currentHuntKills,
+        completedAt: Date.now()
+      });
+      this.advanceNext();
+    }
   }
 
   handleCapture({ at, poke }) {

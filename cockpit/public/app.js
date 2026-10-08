@@ -19,7 +19,8 @@ const state = {
   market: { rawResults: [], accountId: '', lastMeta: null },
   radar: { wishlist: [], matches: [], currencyFilter: '' },
   bag: { accountId: '', items: [], selected: new Set(), categoryFilter: '', search: '', marketSummary: {}, myListings: [], activeItem: null },
-  route: { accountId: '', presets: [], activePresetId: null, queue: [], status: null },
+  route: { accountId: '', presets: [], customPresets: [], activePresetId: null, queue: [], status: null },
+  breeder: { accountId: '', data: null, currentView: 'ready', sim: { parent1Id: null, parent2Id: null, mode: 'free', doubleStones: false } },
   tickers: null,
   speciesList: []
 };
@@ -27,6 +28,48 @@ const state = {
 const $ = sel => document.querySelector(sel);
 const fmt = n => n == null ? '—' : n === Infinity ? '∞' : Number(n).toLocaleString('pt-BR');
 const time = at => new Date(at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+
+function toSlug(name) {
+  return String(name || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+}
+
+function findSpeciesInCatalog(input) {
+  if (!input || !state.speciesList?.length) return null;
+  const raw = String(input).trim();
+  
+  // 1. Se contiver número (ex: "#038", "#38", "38", "#038 Ninetales")
+  const numMatch = raw.match(/#?(\d+)/);
+  if (numMatch) {
+    const pokeId = Number(numMatch[1]);
+    const byId = state.speciesList.find(s => Number(s.pokeId) === pokeId);
+    if (byId) return byId;
+  }
+  
+  // 2. Normalização de texto
+  const clean = str => String(str || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '');
+
+  const targetClean = clean(raw);
+  if (!targetClean) return null;
+
+  // Busca exata limpa
+  let found = state.speciesList.find(s => clean(s.name) === targetClean);
+  if (found) return found;
+
+  // Busca por contenção
+  found = state.speciesList.find(s => clean(s.name).includes(targetClean) || targetClean.includes(clean(s.name)));
+  if (found) return found;
+
+  return null;
+}
 
 function el(tag, attrs = {}, ...children) {
   const node = document.createElement(tag);
@@ -286,6 +329,12 @@ function duration(seconds) {
 }
 
 function huntingStatus(a) {
+  if (a.status === 'handedOff') {
+    if (a.lastKillAt && Date.now() - a.lastKillAt < 120000) {
+      return ['No navegador (Observando)', 'ok'];
+    }
+    return ['No navegador', 'info'];
+  }
   if (a.status !== 'online') return STATUS[a.status] ?? [a.status, 'warn'];
   if (a.lastKillAt && Date.now() - a.lastKillAt < 120000) return [`Online`, 'ok'];
   return [a.lastKillAt ? `Online · sem kill` : 'Online', 'warn'];
@@ -293,12 +342,13 @@ function huntingStatus(a) {
 
 function sessionVisor(z, a) {
   const capturesPerHour = z?.seconds > 60 && z.captures > 0 ? (z.captures / z.seconds) * 3600 : 0;
-  const isOnline = a.status === 'online';
+  const isOnline = a.status === 'online' || a.status === 'handedOff';
+  const isObserving = a.status === 'handedOff';
   return el('div', { class: 'session-visor' },
     el('div', { class: 'session-visor-top' },
       el('div', { class: 'session-visor-title' },
         el('span', { class: `session-visor-dot ${isOnline ? 'active' : 'idle'}` }),
-        el('span', { class: 'mono' }, 'VISOR DE SESSÃO'),
+        el('span', { class: 'mono' }, isObserving ? 'SESSÃO NO NAVEGADOR' : 'VISOR DE SESSÃO'),
         a.hunt ? el('span', { class: 'session-visor-hunt' }, `· ${a.hunt}`) : null
       ),
       el('span', { class: 'session-visor-xp mono' }, z?.xpPerHour ? `✨ ${fmt(z.xpPerHour)} XP/h` : '')
@@ -307,7 +357,7 @@ function sessionVisor(z, a) {
       el('div', { class: 'session-cell' },
         el('span', { class: 'session-cell-label' }, '⏱️ Duração'),
         el('span', { class: 'session-cell-val mono' }, duration(z?.seconds || 0)),
-        el('span', { class: 'session-cell-sub mono' }, isOnline ? (z?.seconds > 0 ? 'sessão ativa' : 'iniciando…') : 'pausada')
+        el('span', { class: 'session-cell-sub mono' }, isOnline ? (z?.seconds > 0 ? (isObserving ? 'observando ao vivo' : 'sessão ativa') : 'iniciando…') : 'pausada')
       ),
       el('div', { class: 'session-cell' },
         el('span', { class: 'session-cell-label' }, '⚔️ Kills'),
@@ -427,7 +477,7 @@ function renderAccountCard(a) {
       )
     ),
     el('div', { class: 'account-footer' },
-      el('span', { class: 'muted mono', style: 'font-size:11px' }, a.lastKillAt ? `Último kill há ${ago(a.lastKillAt)}` : (a.status === 'online' ? 'Sessão ativa · aguardando kill' : 'Conta pausada')),
+      el('span', { class: 'muted mono', style: 'font-size:11px' }, a.lastKillAt ? `Último kill há ${ago(a.lastKillAt)}` : (a.status === 'online' ? 'Sessão ativa · aguardando kill' : (a.status === 'handedOff' ? 'Observando no navegador' : 'Conta pausada'))),
       el('div', { class: 'account-actions' }, actions)
     ),
     a.alerts?.length ? el('div', { class: 'alerts' }, a.alerts.map(al => el('div', { class: `alert ${al.level}` }, al.text))) : null
@@ -533,7 +583,7 @@ function renderSessionShinies() {
 }
 
 function refreshAccountSelects() {
-  for (const [sel, allowAll] of [['#col-account', false], ['#hl-account', true], ['#mk-account', false], ['#bag-account', false], ['#route-account', false]]) {
+  for (const [sel, allowAll] of [['#col-account', false], ['#hl-account', true], ['#mk-account', false], ['#bag-account', false], ['#route-account', false], ['#breeder-account', false]]) {
     const select = $(sel);
     if (!select) continue;
     const current = select.value;
@@ -594,6 +644,7 @@ function collectionRows() {
   const type = $('#col-type').value;
   const text = $('#col-text').value.trim().toLowerCase();
   const { sort, dir } = state.collection;
+
   return state.collection.items
     .filter(p => !tag || p.tags.includes(tag) || (tag === 'none' && !p.tags.length))
     .filter(p => !type || p.profile?.types.includes(type))
@@ -656,7 +707,7 @@ function renderCollection() {
       })),
       el('td', { class: 'poke-cell' },
         spriteImg,
-        el('span', {}, `${p.shiny ? '✨ ' : ''}${p.name}`, p.team ? el('span', { class: 'muted' }, ' (time)') : null)
+        el('span', {}, `${p.shiny ? '✨ ' : ''}${p.name}`, (p.team ? el('span', { class: 'muted' }, ' (time)') : null))
       ),
       el('td', {}, tagBadges(p.tags, p.reasons)),
       el('td', { class: 'num' }, fmt(p.level)),
@@ -678,7 +729,7 @@ function renderCollection() {
   });
   $('#col-table').replaceChildren(el('thead', {}, head), el('tbody', {}, body));
 
-  // Pokedex Grid Mode
+  // Cards Grid Mode
   const gridCards = rows.map(p => {
     const prot = p.team || p.starter || p.locked;
     const isChecked = selected.has(String(p.id));
@@ -722,7 +773,7 @@ function renderCollection() {
           title: 'Ver preço médio no mercado',
           onclick: (e) => { e.stopPropagation(); openMarketEstimate(p); }
         }, '💡 Mercado'),
-        p.sellValue != null ? el('span', { class: 'muted mono' }, `$ ${fmt(p.sellValue)}`) : null
+        (p.sellValue != null) ? el('span', { class: 'muted mono' }, `$ ${fmt(p.sellValue)}`) : null
       )
     );
   });
@@ -746,7 +797,7 @@ function setCollectionView(mode) {
 function updateCollectionCount(rows) {
   const selected = state.collection.items.filter(p => state.collection.selected.has(String(p.id)));
   const gold = selected.reduce((s, p) => s + (p.sellValue ?? 0), 0);
-  $('#col-count').textContent = `${rows.length} de ${state.collection.items.length} · ${selected.length} selecionados ($ ${fmt(gold)})`;
+  $('#col-count').textContent = `${rows.length} de ${state.collection.items.length} Pokémon · ${selected.length} selecionados ($ ${fmt(gold)})`;
 
   const dock = $('#col-floating-dock');
   if (dock) {
@@ -756,6 +807,13 @@ function updateCollectionCount(rows) {
     } else {
       dock.classList.add('hidden');
     }
+  }
+}
+
+function addSpeciesToRouteQueue(speciesId, name) {
+  switchTab('rota');
+  if (typeof addToCustomQueue === 'function') {
+    addToCustomQueue({ speciesId, name });
   }
 }
 
@@ -1850,13 +1908,17 @@ async function loadRouteData(force = false) {
   state.route.accountId = accountId;
 
   try {
-    const [presetsData, statusData] = await Promise.all([
+    const [presetsData, customPresetsData, statusData] = await Promise.all([
       api(`/api/routes/presets?accountId=${encodeURIComponent(accountId)}`),
+      api('/api/routes/custom').catch(() => ({ presets: [] })),
       api(`/api/accounts/${encodeURIComponent(accountId)}/route`)
     ]);
 
     state.route.presets = presetsData.presets || [];
+    state.route.customPresets = customPresetsData.presets || [];
     state.route.status = statusData || null;
+
+    renderSavedCustomPresetsDropdown();
 
     if (statusData && statusData.running) {
       state.route.queue = statusData.queue || [];
@@ -1875,6 +1937,15 @@ async function loadRouteData(force = false) {
   } catch (err) {
     console.error('Erro ao carregar rota automática:', err);
   }
+}
+
+function renderSavedCustomPresetsDropdown() {
+  const select = $('#route-saved-presets');
+  if (!select) return;
+  const current = select.value;
+  const options = (state.route.customPresets || []).map(p => el('option', { value: p.id }, `${p.name} (${p.queue?.length || 0} pokes)`));
+  select.replaceChildren(el('option', { value: '' }, '-- Selecione um preset salvo --'), ...options);
+  if ([...select.options].some(o => o.value === current)) select.value = current;
 }
 
 function selectRoutePreset(presetId) {
@@ -2059,20 +2130,249 @@ function renderRouteQueue() {
             : null
         )
       ),
-      !isRunning ? el('button', {
-        type: 'button',
-        class: 'btn-queue-remove',
-        title: 'Remover da fila',
-        onclick: (e) => {
-          e.stopPropagation();
-          state.route.queue.splice(idx, 1);
-          renderRouteQueue();
-        }
-      }, '✕') : null
+      !isRunning ? el('div', { class: 'queue-card-actions' },
+        idx > 0 ? el('button', {
+          type: 'button',
+          class: 'btn-hardware-subtle mini',
+          title: 'Mover para cima',
+          onclick: (e) => { e.stopPropagation(); moveRouteQueueItem(idx, -1); }
+        }, '▲') : null,
+        idx < queue.length - 1 ? el('button', {
+          type: 'button',
+          class: 'btn-hardware-subtle mini',
+          title: 'Mover para baixo',
+          onclick: (e) => { e.stopPropagation(); moveRouteQueueItem(idx, 1); }
+        }, '▼') : null,
+        el('button', {
+          type: 'button',
+          class: 'btn-queue-remove',
+          title: 'Remover da fila',
+          onclick: (e) => {
+            e.stopPropagation();
+            state.route.queue.splice(idx, 1);
+            renderRouteQueue();
+          }
+        }, '✕')
+      ) : null
     );
   });
 
   container.replaceChildren(...cards);
+}
+
+function moveRouteQueueItem(index, dir) {
+  const newIdx = index + dir;
+  if (newIdx < 0 || newIdx >= state.route.queue.length) return;
+  const [item] = state.route.queue.splice(index, 1);
+  state.route.queue.splice(newIdx, 0, item);
+  renderRouteQueue();
+}
+
+function addToCustomQueue(pokeOrSpecies) {
+  if (!pokeOrSpecies) return;
+  const speciesId = Number(pokeOrSpecies.speciesId || pokeOrSpecies.pokeId || pokeOrSpecies.id);
+  const name = pokeOrSpecies.name || `Pokémon #${speciesId}`;
+  const slug = toSlug(name);
+  state.route.queue.push({
+    speciesId,
+    name,
+    slug,
+    level: pokeOrSpecies.level || 1,
+    types: pokeOrSpecies.types || (pokeOrSpecies.type1 ? [pokeOrSpecies.type1, pokeOrSpecies.type2].filter(Boolean).map(t => String(t).toLowerCase()) : []),
+    target: Number($('#route-target-captures')?.value) || 1,
+    targetKills: Number($('#route-target-kills')?.value) || 0,
+    captures: 0,
+    kills: 0,
+    status: 'pending'
+  });
+  state.route.activePresetId = null;
+  renderRoutePresets();
+  renderRouteQueue();
+}
+
+async function addPokedexMissingToRouteQueue() {
+  const accountId = state.route.accountId || $('#route-account').value;
+  if (!accountId) return alert('Selecione uma conta.');
+  let userPokes = state.collection.items;
+  if (!userPokes || !userPokes.length) {
+    try {
+      const res = await api(`/api/accounts/${encodeURIComponent(accountId)}/pokes`);
+      userPokes = res.pokes || [];
+    } catch {}
+  }
+  const ownedSpeciesSet = new Set((userPokes || []).map(p => Number(p.speciesId)).filter(Boolean));
+  const allSpecies = state.speciesList?.length ? state.speciesList : [];
+  const missing = allSpecies.filter(s => !ownedSpeciesSet.has(Number(s.pokeId)));
+  if (!missing.length) {
+    return alert('Parabéns! Esta conta já possui todos os Pokémon catalogados!');
+  }
+  let count = 0;
+  for (const m of missing) {
+    if (!state.route.queue.some(q => q.speciesId === m.pokeId)) {
+      state.route.queue.push({
+        speciesId: m.pokeId,
+        name: m.name,
+        slug: toSlug(m.name),
+        level: 1,
+        types: [m.type1, m.type2].filter(Boolean).map(t => String(t).toLowerCase()),
+        target: Number($('#route-target-captures')?.value) || 1,
+        targetKills: Number($('#route-target-kills')?.value) || 0,
+        captures: 0,
+        kills: 0,
+        status: 'pending'
+      });
+      count++;
+    }
+  }
+  state.route.activePresetId = null;
+  renderRoutePresets();
+  renderRouteQueue();
+  alert(`Adicionados ${count} Pokémon faltantes da Pokédex à fila de rota!`);
+}
+
+async function saveCurrentRouteAsPreset() {
+  if (!state.route.queue || !state.route.queue.length) {
+    return alert('A fila de rota está vazia! Adicione Pokémon antes de salvar como preset.');
+  }
+  const defaultName = `Preset Rota (${state.route.queue.length} pokes)`;
+  const name = prompt('Digite um nome para este preset:', defaultName);
+  if (!name || !name.trim()) return;
+
+  const targetCaptures = Number($('#route-target-captures')?.value) || 1;
+  const targetKills = Number($('#route-target-kills')?.value) || 0;
+  const maxTimeSec = Number($('#route-max-time')?.value) || 300;
+  const noKillTimeoutSec = Number($('#route-no-kill-timeout')?.value ?? 60);
+  const returnHome = $('#route-return-home')?.checked ?? true;
+
+  try {
+    const res = await api('/api/routes/custom', {
+      method: 'POST',
+      body: {
+        name: name.trim(),
+        queue: state.route.queue,
+        settings: { targetCaptures, targetKills, maxTimeSec, noKillTimeoutSec, returnHome }
+      }
+    });
+    if (res.preset) {
+      state.route.customPresets = state.route.customPresets.filter(p => p.id !== res.preset.id);
+      state.route.customPresets.push(res.preset);
+      renderSavedCustomPresetsDropdown();
+      $('#route-saved-presets').value = res.preset.id;
+      alert(`Preset "${res.preset.name}" salvo com sucesso!`);
+    }
+  } catch (err) {
+    alert(`Erro ao salvar preset: ${err.message}`);
+  }
+}
+
+function loadSelectedRoutePreset() {
+  const presetId = $('#route-saved-presets')?.value;
+  if (!presetId) return alert('Selecione um preset salvo no menu dropdown.');
+  const preset = state.route.customPresets.find(p => p.id === presetId);
+  if (!preset) return alert('Preset não encontrado.');
+
+  state.route.queue = JSON.parse(JSON.stringify(preset.queue || []));
+  state.route.activePresetId = null;
+
+  if (preset.settings) {
+    if (preset.settings.targetCaptures && $('#route-target-captures')) $('#route-target-captures').value = String(preset.settings.targetCaptures);
+    if (preset.settings.targetKills !== undefined && $('#route-target-kills')) $('#route-target-kills').value = String(preset.settings.targetKills);
+    if (preset.settings.maxTimeSec && $('#route-max-time')) $('#route-max-time').value = String(preset.settings.maxTimeSec);
+    if (preset.settings.noKillTimeoutSec !== undefined && $('#route-no-kill-timeout')) $('#route-no-kill-timeout').value = String(preset.settings.noKillTimeoutSec);
+    if (preset.settings.returnHome !== undefined && $('#route-return-home')) $('#route-return-home').checked = Boolean(preset.settings.returnHome);
+  }
+
+  renderRoutePresets();
+  renderRouteQueue();
+}
+
+async function deleteSelectedRoutePreset() {
+  const presetId = $('#route-saved-presets')?.value;
+  if (!presetId) return alert('Selecione um preset salvo para excluir.');
+  const preset = state.route.customPresets.find(p => p.id === presetId);
+  if (!confirm(`Deseja realmente excluir o preset "${preset?.name || presetId}"?`)) return;
+
+  try {
+    await api(`/api/routes/custom/${encodeURIComponent(presetId)}`, { method: 'DELETE' });
+    state.route.customPresets = state.route.customPresets.filter(p => p.id !== presetId);
+    renderSavedCustomPresetsDropdown();
+    alert('Preset excluído com sucesso.');
+  } catch (err) {
+    alert(`Erro ao excluir preset: ${err.message}`);
+  }
+}
+
+function exportRouteAsJson() {
+  const payload = {
+    version: 1,
+    name: 'Rota Exportada Cockpit',
+    queue: state.route.queue,
+    settings: {
+      targetCaptures: Number($('#route-target-captures')?.value) || 1,
+      targetKills: Number($('#route-target-kills')?.value) || 0,
+      maxTimeSec: Number($('#route-max-time')?.value) || 300,
+      noKillTimeoutSec: Number($('#route-no-kill-timeout')?.value ?? 60),
+      returnHome: $('#route-return-home')?.checked ?? true
+    }
+  };
+  const dlg = $('#dlg-route-io');
+  if (dlg) {
+    $('#route-io-title').textContent = '📤 Exportar Rota (JSON)';
+    $('#route-io-desc').textContent = 'Copie o JSON abaixo para salvar ou compartilhar sua rota customizada.';
+    $('#route-io-json').value = JSON.stringify(payload, null, 2);
+    $('#route-io-submit').hidden = true;
+    dlg.showModal();
+  }
+}
+
+function importRouteFromJson() {
+  const dlg = $('#dlg-route-io');
+  if (dlg) {
+    $('#route-io-title').textContent = '📥 Importar Rota (JSON)';
+    $('#route-io-desc').textContent = 'Cole o JSON da rota abaixo e clique em "Aplicar Rota".';
+    $('#route-io-json').value = '';
+    $('#route-io-submit').hidden = false;
+    dlg.showModal();
+  }
+}
+
+function applyRouteJson() {
+  const text = $('#route-io-json')?.value?.trim();
+  if (!text) return alert('Cole o JSON da rota.');
+  try {
+    const data = JSON.parse(text);
+    const list = Array.isArray(data) ? data : (data.queue || data.items || []);
+    if (!list.length) throw new Error('O JSON não contém uma lista de Pokémon.');
+
+    state.route.queue = list.map(q => ({
+      speciesId: Number(q.speciesId || q.pokeId || q.id),
+      name: q.name || `Pokémon #${q.speciesId}`,
+      slug: q.slug || toSlug(q.name),
+      level: q.level || 1,
+      types: q.types || [],
+      target: Number(q.target || q.targetCaptures) || 1,
+      targetKills: Number(q.targetKills) || 0,
+      captures: 0,
+      kills: 0,
+      status: 'pending'
+    }));
+
+    if (data.settings) {
+      if (data.settings.targetCaptures && $('#route-target-captures')) $('#route-target-captures').value = String(data.settings.targetCaptures);
+      if (data.settings.targetKills !== undefined && $('#route-target-kills')) $('#route-target-kills').value = String(data.settings.targetKills);
+      if (data.settings.maxTimeSec && $('#route-max-time')) $('#route-max-time').value = String(data.settings.maxTimeSec);
+      if (data.settings.noKillTimeoutSec !== undefined && $('#route-no-kill-timeout')) $('#route-no-kill-timeout').value = String(data.settings.noKillTimeoutSec);
+      if (data.settings.returnHome !== undefined && $('#route-return-home')) $('#route-return-home').checked = Boolean(data.settings.returnHome);
+    }
+
+    state.route.activePresetId = null;
+    renderRoutePresets();
+    renderRouteQueue();
+    $('#dlg-route-io')?.close();
+    alert(`Rota com ${state.route.queue.length} Pokémon carregada com sucesso!`);
+  } catch (err) {
+    alert(`JSON inválido: ${err.message}`);
+  }
 }
 
 function updateRouteBadge() {
@@ -2114,9 +2414,10 @@ async function startAutoRoute() {
   if (!accountId) return alert('Selecione uma conta.');
 
   const queue = state.route.queue;
-  if (!queue || !queue.length) return alert('A fila de rota está vazia. Selecione um Preset antes de iniciar.');
+  if (!queue || !queue.length) return alert('A fila de rota está vazia. Adicione Pokémon ou selecione um Preset antes de iniciar.');
 
   const targetPerPoke = Number($('#route-target-captures').value) || 1;
+  const targetKills = Number($('#route-target-kills')?.value) || 0;
   const timeoutSec = Number($('#route-max-time').value) || 300;
   const noKillTimeoutSec = Number($('#route-no-kill-timeout')?.value ?? 60);
   const returnToHome = $('#route-return-home').checked;
@@ -2129,6 +2430,7 @@ async function startAutoRoute() {
         route: queue,
         targetCaptures: targetPerPoke,
         targetPerPoke,
+        targetKills,
         maxTimeSec: timeoutSec,
         timeoutSec,
         noKillTimeoutSec,
@@ -2187,6 +2489,537 @@ async function stopAutoRoute() {
   }
 }
 
+// ---------- Breeder (Calculadora & Simulador PIW Oficial) ----------
+
+const BREEDER_FREE_BONUSES = [
+  { bonus: 0.005, probability: 0.50, label: 'Cenário 1 (+0.005)' },
+  { bonus: 0.010, probability: 0.35, label: 'Cenário 2 (+0.010)' },
+  { bonus: 0.020, probability: 0.12, label: 'Cenário 3 (+0.020)' },
+  { bonus: 0.040, probability: 0.03, label: 'Cenário 4 (+0.040)' }
+];
+
+const BREEDER_PHERO_BONUSES = [
+  { bonus: 0.150, probability: 0.50, label: 'Cenário 1 (+0.150)' },
+  { bonus: 0.200, probability: 0.30, label: 'Cenário 2 (+0.200)' },
+  { bonus: 0.250, probability: 0.15, label: 'Cenário 3 (+0.250)' },
+  { bonus: 0.300, probability: 0.05, label: 'Cenário 4 (+0.300)' }
+];
+
+const BREEDER_QUALITY_CAP = 2.600;
+
+async function loadBreeder(force = false) {
+  const accountSelect = $('#breeder-account');
+  const accountId = accountSelect?.value || state.breeder.accountId || [...state.accounts.keys()][0] || '';
+  if (!accountId) return;
+  state.breeder.accountId = accountId;
+
+  // Garante que temos a coleção da conta carregada para o simulador
+  if (!state.collection.items?.length || state.collection.accountId !== accountId) {
+    try {
+      const res = await api(`/api/accounts/${encodeURIComponent(accountId)}/pokes`);
+      state.collection.items = res.pokes || [];
+      state.collection.accountId = accountId;
+    } catch {}
+  }
+
+  try {
+    const data = await api(`/api/accounts/${encodeURIComponent(accountId)}/breeder`);
+    state.breeder.data = data;
+    populateBreederSelects();
+    updateBreederSimulator();
+    renderBreeder();
+  } catch (err) {
+    console.error('Erro ao carregar dados de breeder:', err);
+  }
+}
+
+function setBreederView(view) {
+  state.breeder.currentView = view;
+  for (const btn of document.querySelectorAll('#breeder-subtabs .pill-filter')) {
+    btn.classList.toggle('active', btn.dataset.bview === view);
+  }
+  renderBreeder();
+}
+
+function populateBreederSelects() {
+  const s1 = $('#breeder-select-p1');
+  const s2 = $('#breeder-select-p2');
+  if (!s1 || !s2) return;
+
+  const pokes = [...(state.collection.items || [])].sort((a, b) => {
+    const n = (a.name || '').localeCompare(b.name || '');
+    if (n !== 0) return n;
+    return (b.quality || 0) - (a.quality || 0);
+  });
+
+  const buildOptions = (selectedId) => {
+    const opts = ['<option value="">Selecione um Pokémon da conta...</option>'];
+    for (const p of pokes) {
+      const q = p.quality != null ? Number(p.quality).toFixed(3) : '1.000';
+      const iv = p.ivTotal || 0;
+      const sh = p.shiny ? '✨ ' : '';
+      const sel = String(p.id) === String(selectedId) ? 'selected' : '';
+      opts.push(`<option value="${p.id}" ${sel}>${sh}${p.name} · Q ${q} · IV ${iv} (Nv ${p.level || 1})</option>`);
+    }
+    return opts.join('');
+  };
+
+  const curr1 = state.breeder.sim.parent1Id || s1.value;
+  const curr2 = state.breeder.sim.parent2Id || s2.value;
+
+  s1.innerHTML = buildOptions(curr1);
+  s2.innerHTML = buildOptions(curr2);
+}
+
+function renderBreederSlotDisplay(slotNum, poke, isDonor) {
+  const container = $(`#breeder-slot${slotNum}-display`);
+  if (!container) return;
+
+  if (!poke) {
+    container.innerHTML = `<div class="slot-placeholder">${slotNum === 1 ? 'Escolha um Pokémon no seletor acima' : 'Escolha um parceiro da mesma espécie'}</div>`;
+    return;
+  }
+
+  const sprite = pokeSpriteUrl(poke.speciesId, poke.shiny);
+  const fallback = pokeStaticSpriteUrl(poke.speciesId, poke.shiny);
+  const qStr = Number(poke.quality || 1.0).toFixed(3);
+  const ivs = {
+    hp: poke.ivHp ?? poke.ivs?.hp ?? 0,
+    atk: poke.ivAttack ?? poke.ivs?.attack ?? 0,
+    def: poke.ivDefense ?? poke.ivs?.defense ?? 0,
+    spa: poke.ivSpecialAttack ?? poke.ivs?.specialAttack ?? 0,
+    spd: poke.ivSpecialDefense ?? poke.ivs?.specialDefense ?? 0,
+    vel: poke.ivSpeed ?? poke.ivs?.speed ?? 0
+  };
+
+  const chips = [
+    { label: 'HP', val: ivs.hp },
+    { label: 'ATK', val: ivs.atk },
+    { label: 'DEF', val: ivs.def },
+    { label: 'SPA', val: ivs.spa },
+    { label: 'SPD', val: ivs.spd },
+    { label: 'VEL', val: ivs.vel }
+  ].map(c => `
+    <div class="slot-iv-chip ${isDonor ? 'donor-highlight' : ''}">
+      <span class="iv-name">${c.label}</span>
+      <span class="iv-val">${c.val}</span>
+    </div>
+  `).join('');
+
+  container.innerHTML = `
+    <div class="slot-poke-display">
+      <img src="${sprite}" alt="${poke.name}" class="slot-poke-sprite" onerror="this.src='${fallback}'">
+      <div class="slot-poke-info">
+        <div class="slot-poke-name">${poke.shiny ? '✨ ' : ''}${poke.name} <small class="muted mono">Nv ${poke.level || 1}</small></div>
+        <div class="slot-poke-stats">
+          <span class="mono bold text-amber">Quality: ×${qStr}</span>
+          <span class="mono bold text-cyan">IV Total: ${poke.ivTotal || 0}/192</span>
+        </div>
+        ${isDonor ? '<div class="mono text-xs text-green" style="font-weight:700;">⭐ Doador Oficial de IVs (Maior Quality)</div>' : ''}
+        <div class="slot-iv-chips">${chips}</div>
+      </div>
+    </div>
+  `;
+}
+
+function updateBreederSimulator() {
+  const s1 = $('#breeder-select-p1');
+  const s2 = $('#breeder-select-p2');
+  const id1 = s1?.value || state.breeder.sim.parent1Id;
+  const id2 = s2?.value || state.breeder.sim.parent2Id;
+  state.breeder.sim.parent1Id = id1;
+  state.breeder.sim.parent2Id = id2;
+
+  const modeRadio = document.querySelector('input[name="breed-mode"]:checked');
+  const mode = modeRadio?.value || 'free';
+  const doubleStones = Boolean($('#breed-double-stones')?.checked);
+  state.breeder.sim.mode = mode;
+  state.breeder.sim.doubleStones = doubleStones;
+
+  const pokes = state.collection.items || [];
+  const p1 = pokes.find(p => String(p.id) === String(id1));
+  const p2 = pokes.find(p => String(p.id) === String(id2));
+
+  const diffEl = $('#breeder-diff-display');
+  const compatEl = $('#breeder-compat-status');
+  const heartEl = $('#breeder-connector-heart');
+  const resultsPanel = $('#breeder-results-panel');
+  const statusBadge = $('#breeder-sim-status-badge');
+
+  if (!p1 && !p2) {
+    renderBreederSlotDisplay(1, null, false);
+    renderBreederSlotDisplay(2, null, false);
+    if (diffEl) diffEl.textContent = 'Δ Q: —';
+    if (compatEl) { compatEl.textContent = 'Selecione 2 Pokémon'; compatEl.className = 'breeder-compat-badge'; }
+    if (heartEl) heartEl.textContent = '🧬';
+    if (statusBadge) statusBadge.textContent = 'Aguardando seleção';
+    if (resultsPanel) resultsPanel.style.display = 'none';
+    return;
+  }
+
+  if (p1 && !p2) {
+    renderBreederSlotDisplay(1, p1, false);
+    renderBreederSlotDisplay(2, null, false);
+    if (diffEl) diffEl.textContent = 'Δ Q: —';
+    if (compatEl) { compatEl.textContent = 'Selecione o Slot 2 da mesma espécie'; compatEl.className = 'breeder-compat-badge'; }
+    if (heartEl) heartEl.textContent = '🧬';
+    if (statusBadge) statusBadge.textContent = 'Pai B pendente';
+    if (resultsPanel) resultsPanel.style.display = 'none';
+    return;
+  }
+
+  if (!p1 && p2) {
+    renderBreederSlotDisplay(1, null, false);
+    renderBreederSlotDisplay(2, p2, false);
+    if (diffEl) diffEl.textContent = 'Δ Q: —';
+    if (compatEl) { compatEl.textContent = 'Selecione o Slot 1 da mesma espécie'; compatEl.className = 'breeder-compat-badge'; }
+    if (heartEl) heartEl.textContent = '🧬';
+    if (statusBadge) statusBadge.textContent = 'Pai A pendente';
+    if (resultsPanel) resultsPanel.style.display = 'none';
+    return;
+  }
+
+  // Ambos selecionados: validação das regras oficiais do PIW
+  const sameSpecies = (p1.speciesId && p2.speciesId && p1.speciesId === p2.speciesId) ||
+    (p1.name && p2.name && p1.name.toLowerCase() === p2.name.toLowerCase());
+
+  const q1 = Math.round((Number(p1.quality) || 1.0) * 1000) / 1000;
+  const q2 = Math.round((Number(p2.quality) || 1.0) * 1000) / 1000;
+  const diffQ = Math.round(Math.abs(q1 - q2) * 1000) / 1000;
+
+  if (diffEl) diffEl.textContent = `Δ Q: ${diffQ.toFixed(3)}`;
+
+  if (!sameSpecies) {
+    renderBreederSlotDisplay(1, p1, false);
+    renderBreederSlotDisplay(2, p2, false);
+    if (compatEl) {
+      compatEl.textContent = '❌ Espécies Diferentes (PIW exige mesma espécie)';
+      compatEl.className = 'breeder-compat-badge compat-err';
+    }
+    if (heartEl) heartEl.textContent = '💔';
+    if (statusBadge) statusBadge.textContent = 'Incompatível';
+    if (resultsPanel) resultsPanel.style.display = 'none';
+    return;
+  }
+
+  if (diffQ > 0.150001) {
+    renderBreederSlotDisplay(1, p1, false);
+    renderBreederSlotDisplay(2, p2, false);
+    if (compatEl) {
+      compatEl.textContent = `❌ Δ Q (${diffQ.toFixed(3)}) ultrapassa limite de 0.150`;
+      compatEl.className = 'breeder-compat-badge compat-err';
+    }
+    if (heartEl) heartEl.textContent = '⚠️';
+    if (statusBadge) statusBadge.textContent = 'Limite Q excedido';
+    if (resultsPanel) resultsPanel.style.display = 'none';
+    return;
+  }
+
+  // 100% COMPATÍVEL!
+  const inheritsFromSlot = q2 > q1 ? 2 : 1;
+  renderBreederSlotDisplay(1, p1, inheritsFromSlot === 1);
+  renderBreederSlotDisplay(2, p2, inheritsFromSlot === 2);
+
+  if (compatEl) {
+    compatEl.textContent = '✅ Par 100% Compatível!';
+    compatEl.className = 'breeder-compat-badge compat-ok';
+  }
+  if (heartEl) heartEl.textContent = '💖';
+  if (statusBadge) statusBadge.textContent = 'Pronto para Cruza';
+
+  // Executa Projeção Matemática
+  const donor = inheritsFromSlot === 2 ? p2 : p1;
+  const baseQ = Math.max(q1, q2);
+  const bonuses = mode === 'pheromone' ? BREEDER_PHERO_BONUSES : BREEDER_FREE_BONUSES;
+  const scenarios = bonuses.map(b => {
+    const rawQ = Math.round((baseQ + b.bonus) * 1000) / 1000;
+    const finalQ = Math.round(Math.min(rawQ, BREEDER_QUALITY_CAP) * 1000) / 1000;
+    const capHit = rawQ > BREEDER_QUALITY_CAP;
+    return { ...b, rawQ, finalQ, capHit };
+  });
+
+  const qMin = scenarios[0].finalQ;
+  const qMax = scenarios[scenarios.length - 1].finalQ;
+  const qExp = Math.round(scenarios.reduce((acc, s) => acc + (s.finalQ * s.probability), 0) * 1000) / 1000;
+
+  if (resultsPanel) resultsPanel.style.display = 'flex';
+
+  // 1. Herança de IVs
+  const ivInfo = $('#breeder-iv-heritage-info');
+  if (ivInfo) {
+    ivInfo.innerHTML = `O filhote herda <strong>100% dos IVs do Slot ${inheritsFromSlot} (${donor.name})</strong>, porque possui maior Quality (<strong>Q ${inheritsFromSlot === 1 ? q1.toFixed(3) : q2.toFixed(3)}</strong> vs Q ${inheritsFromSlot === 1 ? q2.toFixed(3) : q1.toFixed(3)}).`;
+  }
+
+  const ivStatsGrid = $('#breeder-inherited-stats-grid');
+  if (ivStatsGrid) {
+    const dIvs = {
+      hp: donor.ivHp ?? donor.ivs?.hp ?? 0,
+      atk: donor.ivAttack ?? donor.ivs?.attack ?? 0,
+      def: donor.ivDefense ?? donor.ivs?.defense ?? 0,
+      spa: donor.ivSpecialAttack ?? donor.ivs?.specialAttack ?? 0,
+      spd: donor.ivSpecialDefense ?? donor.ivs?.specialDefense ?? 0,
+      vel: donor.ivSpeed ?? donor.ivs?.speed ?? 0
+    };
+    ivStatsGrid.innerHTML = `
+      <div class="slot-iv-chips" style="margin-top:6px;">
+        <div class="slot-iv-chip donor-highlight"><span class="iv-name">HP</span><span class="iv-val">${dIvs.hp}</span></div>
+        <div class="slot-iv-chip donor-highlight"><span class="iv-name">ATK</span><span class="iv-val">${dIvs.atk}</span></div>
+        <div class="slot-iv-chip donor-highlight"><span class="iv-name">DEF</span><span class="iv-val">${dIvs.def}</span></div>
+        <div class="slot-iv-chip donor-highlight"><span class="iv-name">SPA</span><span class="iv-val">${dIvs.spa}</span></div>
+        <div class="slot-iv-chip donor-highlight"><span class="iv-name">SPD</span><span class="iv-val">${dIvs.spd}</span></div>
+        <div class="slot-iv-chip donor-highlight"><span class="iv-name">VEL</span><span class="iv-val">${dIvs.vel}</span></div>
+      </div>
+      <div class="mono bold text-cyan text-xs" style="margin-top:4px;">Total Herdado: ${donor.ivTotal || 0}/192 IVs</div>
+    `;
+  }
+
+  const warnBox = $('#breeder-heritage-warning');
+  if (warnBox) {
+    if (inheritsFromSlot === 2 && (p1.ivTotal || 0) > (p2.ivTotal || 0)) {
+      warnBox.style.display = 'block';
+      warnBox.innerHTML = `⚠️ <strong>Atenção de Estratégia:</strong> O Slot 2 possui maior Quality e substituirá os IVs do Slot 1! O filhote nascerá com IV ${p2.ivTotal || 0} em vez de IV ${p1.ivTotal || 0}. Se você queria os IVs do Slot 1, ele precisaria ter a maior Quality.`;
+    } else if (q1 === q2) {
+      warnBox.style.display = 'block';
+      warnBox.innerHTML = `ℹ️ <strong>Empate de Quality:</strong> Ambos os pais possuem exatamente Q ${q1.toFixed(3)}. Pela regra do jogo, os IVs foram herdados do <strong>Slot 1</strong>.`;
+    } else {
+      warnBox.style.display = 'none';
+    }
+  }
+
+  // 2. Projeção de Quality
+  if ($('#breeder-res-qmin')) $('#breeder-res-qmin').textContent = qMin.toFixed(3);
+  if ($('#breeder-res-qexp')) $('#breeder-res-qexp').textContent = qExp.toFixed(3);
+  if ($('#breeder-res-qmax')) $('#breeder-res-qmax').textContent = qMax.toFixed(3);
+
+  const tbody = $('#breeder-scenarios-tbody');
+  if (tbody) {
+    tbody.innerHTML = scenarios.map((s, idx) => `
+      <tr>
+        <td class="bold">${s.label}</td>
+        <td class="mono">${Math.round(s.probability * 100)}%</td>
+        <td class="mono pos bold">+${s.bonus.toFixed(3)}</td>
+        <td class="mono bold ${s.capHit ? 'text-amber' : 'text-green'}">Q ${s.finalQ.toFixed(3)}</td>
+        <td>${s.capHit ? '<span class="tag" style="--tag:#f59e0b;color:#fde68a;">⚠️ Teto 2.600 Atingido</span>' : '<span class="tag" style="--tag:#22c55e;color:#86efac;">100% Eficaz</span>'}</td>
+      </tr>
+    `).join('');
+  }
+
+  // 3. Custos & Extras
+  const costsList = $('#breeder-costs-list');
+  if (costsList) {
+    const stoneQty = doubleStones ? 40 : 20;
+    const pheroQty = mode === 'pheromone' ? 9 : 0;
+    costsList.innerHTML = `
+      <div class="cost-row"><span>💵 Gold Obrigatório:</span><strong class="mono text-amber">R$ 2.000.000</strong></div>
+      <div class="cost-row"><span>💎 Evolution Stones:</span><strong class="mono text-cyan">${stoneQty} Stones</strong></div>
+      <div class="cost-row"><span>🧪 Strange Pheromones:</span><strong class="mono ${pheroQty > 0 ? 'text-purple' : 'muted'}">${pheroQty} Pheromones</strong></div>
+      ${doubleStones ? '<div class="cost-row" style="background:rgba(6,182,212,0.15);"><span>✨ Double Stones Ativo:</span><strong class="text-cyan mono">5% de chance de +1 IV aleatório</strong></div>' : ''}
+    `;
+  }
+
+  const shinyBox = $('#breeder-shiny-chance-box');
+  if (shinyBox) {
+    const hasShiny = Boolean(p1.shiny || p2.shiny);
+    shinyBox.innerHTML = hasShiny
+      ? '✨ <strong>Filhote 100% Shiny Garantido!</strong> (Um dos pais é Shiny)'
+      : '🎲 <strong>5% de chance espontânea</strong> de o ovo chocar Shiny.';
+  }
+}
+
+function loadBreederPairIntoSim(p1Id, p2Id) {
+  const s1 = $('#breeder-select-p1');
+  const s2 = $('#breeder-select-p2');
+  if (s1) s1.value = p1Id;
+  if (s2) s2.value = p2Id;
+  state.breeder.sim.parent1Id = p1Id;
+  state.breeder.sim.parent2Id = p2Id;
+  updateBreederSimulator();
+
+  const card = document.querySelector('.breeder-simulator-card');
+  if (card) card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function renderBreeder() {
+  const data = state.breeder.data;
+  if (!data) return;
+
+  const s = data.summary || {};
+  if ($('#breeder-m-pairs')) $('#breeder-m-pairs').textContent = fmt(s.readyPairsCount || 0);
+  if ($('#breeder-m-matrizes')) $('#breeder-m-matrizes').textContent = fmt(s.totalMatrizes || 0);
+  if ($('#breeder-m-highq')) $('#breeder-m-highq').textContent = fmt(s.totalHighQ || 0);
+  if ($('#breeder-m-near')) $('#breeder-m-near').textContent = fmt(s.nearPairsCount || 0);
+
+  const view = state.breeder.currentView || 'ready';
+  const container = $('#breeder-content-list');
+  const countBadge = $('#breeder-pairs-count');
+  const viewTitle = $('#breeder-view-title');
+  if (!container) return;
+
+  if (view === 'ready') {
+    if (viewTitle) viewTitle.textContent = '🧬 Pares Compatíveis na Sua Coleção (Prontos)';
+    const pairs = data.readyPairs || [];
+    if (countBadge) countBadge.textContent = `${pairs.length} pares compatíveis`;
+
+    if (!pairs.length) {
+      container.replaceChildren(el('div', { class: 'empty', style: 'grid-column: 1/-1' }, 'Nenhum par compatível encontrado. Para cruzar no Poke Idle World, você precisa de 2 Pokémon da mesma espécie com diferença de Quality de até 0.150.'));
+      return;
+    }
+
+    const cards = pairs.map(p => {
+      const isPerfect = p.tier === 'PERFEITO';
+      const starIcons = '⭐'.repeat(p.stars || 1);
+      const donorSlot = p.simFree?.inheritsFromSlot || 1;
+
+      const renderParent = (parent, isD) => el('div', { class: `breeder-parent-box ${isD ? 'donor-box' : ''}` },
+        el('img', { src: pokeStaticSpriteUrl(parent.speciesId), class: 'breeder-parent-sprite', alt: parent.name, onerror: e => e.target.style.display = 'none' }),
+        el('div', { class: 'breeder-parent-details' },
+          el('span', { class: `breeder-parent-role ${isD ? 'role-iv' : 'role-q'}` }, isD ? 'Doador de IV' : 'Parceiro Q'),
+          el('span', { class: 'breeder-parent-name' }, `${parent.shiny ? '✨ ' : ''}${parent.name}`),
+          el('span', { class: 'mono text-xs muted' }, `IV ${parent.ivTotal} · Q ${parent.quality.toFixed(3)}`)
+        )
+      );
+
+      return el('div', { class: `breeder-match-card ${isPerfect ? 'is-perfect' : ''}` },
+        el('div', { class: 'breeder-card-top' },
+          el('div', { class: 'breeder-fam-title' },
+            el('span', {}, p.speciesName),
+            el('span', { class: 'tag', style: isPerfect ? '--tag:#fcd34d; color:#78350f;' : '--tag:#22c55e; color:#86efac;' }, `${starIcons} ${p.tier}`),
+            el('span', { class: 'mono text-xs muted' }, `Δ Q: ${p.diffQuality.toFixed(3)}`)
+          ),
+          el('button', {
+            type: 'button',
+            class: 'btn-hardware-action small',
+            title: 'Carregar este par diretamente no simulador de bancada',
+            onclick: () => loadBreederPairIntoSim(p.parentA.id, p.parentB.id)
+          }, '🧪 Testar na Bancada')
+        ),
+        el('div', { class: 'breeder-parents-row' },
+          renderParent(p.parentA, donorSlot === 1),
+          el('span', { class: 'breeder-heart' }, '❤️'),
+          renderParent(p.parentB, donorSlot === 2)
+        ),
+        el('div', { class: 'breeder-result-bar' },
+          el('span', { class: 'bold' }, '✨ Filhote Esperado:'),
+          el('span', { class: 'mono pos bold' }, `IV ${p.simFree?.donorIvTotal || '—'} · Q ~${p.simFree?.expectedQuality?.toFixed(3) || '—'} (Free) / ~${p.simPhero?.expectedQuality?.toFixed(3) || '—'} (Phero)`)
+        )
+      );
+    });
+
+    container.replaceChildren(...cards);
+
+  } else if (view === 'near') {
+    if (viewTitle) viewTitle.textContent = '⚠️ Quase Compatíveis (Diferença de Quality > 0.150)';
+    const nearPairs = data.nearPairs || [];
+    if (countBadge) countBadge.textContent = `${nearPairs.length} pares`;
+
+    if (!nearPairs.length) {
+      container.replaceChildren(el('div', { class: 'empty', style: 'grid-column: 1/-1' }, 'Nenhum par na faixa de 0.151 a 0.350 de diferença de Quality.'));
+      return;
+    }
+
+    const cards = nearPairs.map(n => el('div', { class: 'breeder-missing-card' },
+      el('div', { class: 'breeder-missing-top' },
+        el('span', { class: 'bold' }, n.speciesName),
+        el('span', { class: 'tag', style: '--tag:#f59e0b; color:#78350f;' }, `Δ Q: ${n.diffQuality.toFixed(3)} (Acima de 0.150)`)
+      ),
+      el('div', { class: 'breeder-missing-body' },
+        el('img', { src: pokeStaticSpriteUrl(n.speciesId), class: 'breeder-parent-sprite', alt: n.speciesName }),
+        el('div', { class: 'breeder-parent-details' },
+          el('span', { class: 'breeder-parent-name' }, `Pai A (Q ${n.parentA.quality.toFixed(3)}) × Pai B (Q ${n.parentB.quality.toFixed(3)})`),
+          el('span', { class: 'text-xs muted' }, n.reason)
+        )
+      ),
+      el('div', { class: 'breeder-missing-actions' },
+        el('button', {
+          type: 'button',
+          class: 'btn-hardware-subtle small',
+          title: 'Adicionar espécie à Rota de Caça Automática',
+          onclick: () => addSpeciesToRouteQueue(n.speciesId, n.speciesName)
+        }, '🧭 Caçar Exemplar Intermediário na Rota')
+      )
+    ));
+
+    container.replaceChildren(...cards);
+
+  } else if (view === 'solo') {
+    if (viewTitle) viewTitle.textContent = '💎 Matrizes Solitárias (Precisam de Parceiro da Mesma Espécie)';
+    const soloList = data.soloMatrizes || [];
+    if (countBadge) countBadge.textContent = `${soloList.length} matrizes`;
+
+    if (!soloList.length) {
+      container.replaceChildren(el('div', { class: 'empty', style: 'grid-column: 1/-1' }, 'Todas as suas matrizes e Pokémon de alta qualidade já possuem companheiros da mesma espécie.'));
+      return;
+    }
+
+    const cards = soloList.map(s => {
+      const p = s.pokemon;
+      const sprite = pokeStaticSpriteUrl(p.speciesId);
+
+      return el('div', { class: 'breeder-missing-card' },
+        el('div', { class: 'breeder-missing-top' },
+          el('span', { class: 'bold' }, `${p.shiny ? '✨ ' : ''}${p.name} (Espécie Única)`),
+          el('span', { class: 'tag', style: '--tag:#60a5fa;' }, `PRECISA DE Q ${s.targetQualityMin.toFixed(3)} a ${s.targetQualityMax.toFixed(3)}`)
+        ),
+        el('div', { class: 'breeder-missing-body' },
+          sprite ? el('img', { src: sprite, class: 'breeder-parent-sprite', alt: p.name }) : null,
+          el('div', { class: 'breeder-parent-details' },
+            el('span', { class: 'breeder-parent-name' }, `Seu exemplar: ${p.name} (IV ${p.ivTotal} · Q ${p.quality.toFixed(3)})`),
+            el('span', { class: 'text-xs muted' }, s.reason)
+          )
+        ),
+        el('div', { class: 'breeder-missing-actions' },
+          el('button', {
+            type: 'button',
+            class: 'btn-hardware-action small',
+            title: 'Criar regra automática no Radar de Mercado',
+            onclick: () => handleAddWishlistFromBreeder({
+              familyName: p.name,
+              familyId: p.speciesId,
+              need: `Q ${s.targetQualityMin.toFixed(3)} - ${s.targetQualityMax.toFixed(3)}`,
+              minQuality: s.targetQualityMin
+            })
+          }, '🎯 Vigiar Parceiro no Mercado'),
+          el('button', {
+            type: 'button',
+            class: 'btn-hardware-subtle small',
+            title: 'Adicionar à Rota de Caça Automática',
+            onclick: () => addSpeciesToRouteQueue(p.speciesId, p.name)
+          }, '🧭 Caçar Parceiro na Rota')
+        )
+      );
+    });
+
+    container.replaceChildren(...cards);
+  }
+}
+
+async function handleAddWishlistFromBreeder(m) {
+  const name = `Breeder: ${m.familyName} (${m.need})`;
+  const speciesName = m.familyName;
+  const speciesId = m.familyId;
+  const minIv = m.minIv || undefined;
+  const minQuality = m.minQuality || undefined;
+
+  try {
+    await api('/api/radar/wishlist', {
+      method: 'POST',
+      body: {
+        name,
+        speciesId,
+        speciesName,
+        currency: 'GOLD',
+        minIv,
+        minQuality,
+        shinyOnly: false
+      }
+    });
+    alert(`🎯 Regra criada no Radar!\nO Cockpit avisará você assim que um ${m.familyName} com ${m.need} for anunciado no Mercado.`);
+    loadRadar();
+  } catch (err) {
+    alert(`Erro ao criar regra de radar: ${err.message}`);
+  }
+}
+
 // ---------- Geral ----------
 
 function switchTab(tab) {
@@ -2202,6 +3035,7 @@ function switchTab(tab) {
   if (tab === 'mercado') loadCommodityTickers();
   if (tab === 'bag') loadBag();
   if (tab === 'rota') loadRouteData();
+  if (tab === 'breeder') loadBreeder();
   if (tab === 'radar') {
     $('#radar-badge')?.classList.add('hidden');
     loadRadar();
@@ -2544,6 +3378,81 @@ function bindUi() {
     state.route.queue = [];
     renderRouteQueue();
   });
+  $('#route-add-poke-btn')?.addEventListener('click', () => {
+    const rawVal = $('#route-add-search')?.value?.trim();
+    if (!rawVal) return;
+
+    const lines = rawVal.split(/[\r\n]+/).map(l => l.trim()).filter(Boolean);
+    let addedCount = 0;
+    const notFound = [];
+
+    for (const line of lines) {
+      if (line.toLowerCase().includes('todos os tipos') || line.toLowerCase().includes('buscar por')) continue;
+      if (line === '🔒' || line === '🔓') continue;
+
+      const found = findSpeciesInCatalog(line);
+      if (found) {
+        addToCustomQueue(found);
+        addedCount++;
+      } else {
+        notFound.push(line);
+      }
+    }
+
+    if (addedCount > 0) {
+      $('#route-add-search').value = '';
+      if (notFound.length > 0) {
+        alert(`Adicionados ${addedCount} Pokémon à fila. Não encontrados (${notFound.length}): ${notFound.slice(0, 5).join(', ')}`);
+      }
+    } else {
+      alert(`Nenhum Pokémon encontrado no catálogo para: "${rawVal}"`);
+    }
+  });
+  $('#route-add-search')?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      $('#route-add-poke-btn')?.click();
+    }
+  });
+  $('#route-save-preset-btn')?.addEventListener('click', saveCurrentRouteAsPreset);
+  $('#route-load-preset-btn')?.addEventListener('click', loadSelectedRoutePreset);
+  $('#route-delete-preset-btn')?.addEventListener('click', deleteSelectedRoutePreset);
+  $('#route-export-preset-btn')?.addEventListener('click', exportRouteAsJson);
+  $('#route-import-preset-btn')?.addEventListener('click', importRouteFromJson);
+  $('#route-io-submit')?.addEventListener('click', applyRouteJson);
+
+  // Breeder (Calculadora & Bancada)
+  $('#breeder-account')?.addEventListener('change', () => loadBreeder(true));
+  $('#breeder-btn-refresh')?.addEventListener('click', () => loadBreeder(true));
+  $('#breeder-select-p1')?.addEventListener('change', updateBreederSimulator);
+  $('#breeder-select-p2')?.addEventListener('change', updateBreederSimulator);
+  document.querySelectorAll('input[name="breed-mode"]').forEach(r => r.addEventListener('change', updateBreederSimulator));
+  $('#breed-double-stones')?.addEventListener('change', updateBreederSimulator);
+
+  $('#breeder-swap-parents-btn')?.addEventListener('click', () => {
+    const s1 = $('#breeder-select-p1');
+    const s2 = $('#breeder-select-p2');
+    if (!s1 || !s2) return;
+    const v1 = s1.value;
+    const v2 = s2.value;
+    s1.value = v2;
+    s2.value = v1;
+    updateBreederSimulator();
+  });
+
+  $('#breeder-clear-sim-btn')?.addEventListener('click', () => {
+    const s1 = $('#breeder-select-p1');
+    const s2 = $('#breeder-select-p2');
+    if (s1) s1.value = '';
+    if (s2) s2.value = '';
+    state.breeder.sim.parent1Id = null;
+    state.breeder.sim.parent2Id = null;
+    updateBreederSimulator();
+  });
+
+  for (const btn of document.querySelectorAll('#breeder-subtabs .pill-filter')) {
+    btn.addEventListener('click', () => setBreederView(btn.dataset.bview));
+  }
 
   setInterval(renderAccounts, 5000);
 }
