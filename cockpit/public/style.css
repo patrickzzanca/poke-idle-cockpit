@@ -49,7 +49,7 @@ body.light-mode {
 }
 
 * { box-sizing: border-box; }
-[hidden], .hidden { display: none !important; }
+[hidden] { display: none !important; }
 
 body {
   margin: 0;
@@ -2862,4 +2862,230 @@ body.light-mode .bag-item-icon-wrap {
 
 
 
+/* ==========================================================================
+   Mobile & Responsive Layout Overhaul
+   ========================================================================== */
 
+@media (max-width: 860px) {
+  .top {
+    flex-wrap: wrap !important;
+    padding: 8px 12px !important;
+    gap: 8px 10px !important;
+    position: sticky !important;
+    top: 0 !important;
+    z-index: 100 !important;
+  }
+
+  .brand {
+    order: 1;
+    gap: 8px;
+  }
+
+  .brand-main {
+    font-size: 13px;
+  }
+
+  .brand-sub {
+    font-size: 10px;
+  }
+
+  .top-actions {
+    order: 2;
+    margin-left: auto;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+
+  .top-actions .status-indicator {
+    font-size: 10px;
+  }
+
+  .top-actions button,
+  .top-actions .segmented-control button {
+    padding: 4px 8px;
+    font-size: 11px;
+  }
+
+  .tabs-nav {
+    order: 3;
+    width: 100% !important;
+    overflow-x: auto !important;
+    white-space: nowrap !important;
+    scrollbar-width: none !important;
+    -webkit-overflow-scrolling: touch !important;
+    display: flex !important;
+    flex-wrap: nowrap !important;
+    gap: 4px !important;
+    padding: 3px !important;
+    border-radius: 10px !important;
+  }
+
+  .tabs-nav::-webkit-scrollbar {
+    display: none !important;
+  }
+
+  .nav-pill {
+    flex-shrink: 0 !important;
+    white-space: nowrap !important;
+    padding: 6px 12px !important;
+    font-size: 11.5px !important;
+    border-radius: 7px !important;
+  }
+
+  main {
+    padding: 12px 10px 70px !important;
+    max-width: 100% !important;
+  }
+
+  .accounts {
+    grid-template-columns: 1fr !important;
+    gap: 12px !important;
+  }
+
+  .account-card {
+    padding: 14px 12px !important;
+    gap: 12px !important;
+    border-radius: 14px !important;
+  }
+
+  .lcd-pocket-large {
+    width: 80px !important;
+    min-height: 90px !important;
+    padding: 4px !important;
+  }
+
+  .sprite-leader-large {
+    max-width: 44px !important;
+    max-height: 44px !important;
+  }
+
+  .leader-name {
+    font-size: 9.5px !important;
+    max-width: 76px !important;
+  }
+
+  .session-visor {
+    padding: 8px 10px !important;
+    gap: 6px !important;
+  }
+
+  .session-visor-grid {
+    grid-template-columns: repeat(3, 1fr) !important;
+    gap: 6px !important;
+  }
+
+  .session-cell-val {
+    font-size: 12px !important;
+  }
+
+  .totals {
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 8px !important;
+  }
+
+  .metric-card {
+    padding: 10px 12px !important;
+  }
+
+  .metric-value {
+    font-size: 15px !important;
+  }
+
+  .controls.hardware-card {
+    padding: 10px !important;
+    gap: 8px !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+  }
+
+  .quick-filters {
+    overflow-x: auto !important;
+    flex-wrap: nowrap !important;
+    scrollbar-width: none !important;
+    -webkit-overflow-scrolling: touch !important;
+    padding-bottom: 2px !important;
+  }
+
+  .quick-filters::-webkit-scrollbar {
+    display: none !important;
+  }
+
+  .pill-filter {
+    flex-shrink: 0 !important;
+    white-space: nowrap !important;
+  }
+
+  .pokedex-grid {
+    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)) !important;
+    gap: 8px !important;
+    max-height: calc(100vh - 220px) !important;
+  }
+
+  .poke-card {
+    padding: 8px !important;
+  }
+
+  .floating-dock {
+    left: 8px !important;
+    right: 8px !important;
+    max-width: none !important;
+    padding: 8px 12px !important;
+    bottom: 8px !important;
+    gap: 8px !important;
+  }
+
+  .session-shinies-panel {
+    margin-top: 14px !important;
+    padding: 12px !important;
+  }
+
+  .panel-header-row {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 6px !important;
+  }
+
+  .shiny-log-item {
+    padding: 8px 10px !important;
+    gap: 8px !important;
+  }
+
+  .shiny-log-sprite {
+    width: 42px !important;
+    height: 42px !important;
+  }
+
+  .shiny-log-name {
+    font-size: 13px !important;
+  }
+
+  .bag-items-grid {
+    grid-template-columns: 1fr !important;
+    gap: 8px !important;
+  }
+
+  .route-params-row {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 10px !important;
+  }
+
+  .route-main-actions {
+    margin-left: 0 !important;
+    width: 100% !important;
+    justify-content: space-between !important;
+  }
+
+  .route-queue-grid {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+@media (max-width: 480px) {
+  .totals {
+    grid-template-columns: 1fr !important;
+  }
+  .session-visor-grid {
+    grid-template-columns: 1fr 1fr !important;
+  }
+}
