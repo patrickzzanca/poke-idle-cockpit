@@ -335,7 +335,8 @@ class Account extends EventEmitter {
         if (Array.isArray(message.mobs)) {
           const currentSlots = new Set();
           for (const mob of message.mobs) {
-            if (mob && mob.shiny && !mob.dead && !mob.respawning) {
+            const isMobShiny = mob && (mob.shiny || mob.isShiny || mob.rarity === 'shiny' || (mob.name && /shiny|✨/i.test(mob.name)));
+            if (isMobShiny && !mob.dead && !mob.respawning) {
               const key = `${mob.slot}:${mob.speciesId}`;
               currentSlots.add(key);
               if (!this.activeShinies.has(key)) {
@@ -371,7 +372,15 @@ class Account extends EventEmitter {
             this.emit('inventory', this.inventory);
           }
         }
-        if (message.shiny) {
+        const isShinyKill = Boolean(
+          message.shiny || message.isShiny || message.rarity === 'shiny' ||
+          (message.speciesName && /shiny|✨/i.test(message.speciesName)) ||
+          [...this.activeShinies].some(k => k.endsWith(`:${message.speciesId}`))
+        );
+        if (isShinyKill) {
+          for (const key of this.activeShinies) {
+            if (key.endsWith(`:${message.speciesId}`)) this.activeShinies.delete(key);
+          }
           this.emit('shiny-encounter', {
             type: 'kill',
             at: Date.now(),
@@ -468,7 +477,8 @@ class Account extends EventEmitter {
     if (leader) {
       this.lastLeader = {
         name: leader.name, level: leader.level, quality: leader.quality, ivTotal: leader.ivTotal,
-        speciesId: leader.speciesId ?? leader.pokeId ?? null, shiny: Boolean(leader.shiny),
+        speciesId: leader.speciesId ?? leader.pokeId ?? null,
+        shiny: Boolean(leader.shiny || leader.isShiny || leader.rarity === 'shiny' || (leader.name && /shiny|✨/i.test(leader.name))),
         hp: leader.hp ?? null, maxHp: leader.maxHp ?? null,
         power: leader.power ?? null,
         ivs: leader.ivs ?? null
