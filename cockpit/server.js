@@ -724,8 +724,9 @@ function createApp({ store, api, species, itemsCatalog }) {
     }
   }
 
-  const radarInterval = setInterval(checkRadar, 5 * 60 * 1000);
-  setTimeout(checkRadar, 15000);
+  // Radar interval desativado a pedido do usuario
+  // const radarInterval = setInterval(checkRadar, 5 * 60 * 1000);
+  // setTimeout(checkRadar, 15000);
 
   function rememberCmid(cmid) {
     if (store.setCmid(cmid)) pushLog({ at: Date.now(), text: 'Impressão desta máquina (cmid) registrada; vale a partir da próxima conexão.' });
