@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PIW Cockpit — Ponte, HUD & Tags
 // @namespace    pk-ext
-// @version      2.1.0
+// @version      2.1.2
 // @description  Liga as abas do Poke Idle World ao cockpit local, exibe HUD de hunt retrátil com radar de shiny, tags unificadas e leitor de IVs.
 // @match        https://poke.idleworld.online/*
 // @match        https://*.idleworld.online/*
@@ -19,7 +19,12 @@
 (() => {
   'use strict';
 
-  let COCKPIT = localStorage.getItem('piw:cockpit_url') || 'http://localhost:8787';
+  let savedUrl = localStorage.getItem('piw:cockpit_url');
+  if (!savedUrl || savedUrl.includes('localhost') || savedUrl.includes('127.0.0.1')) {
+    savedUrl = 'http://192.168.100.103:8787';
+    localStorage.setItem('piw:cockpit_url', savedUrl);
+  }
+  let COCKPIT = savedUrl;
   const page = unsafeWindow;
   const store = page.sessionStorage;
   const TOKENS_KEY = 'pokeweb:tokens';
@@ -1011,17 +1016,76 @@
         50% { box-shadow: 0 0 35px rgba(250,204,21,0.8); }
       }
       .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+      #piw-bridge { position: fixed; right: 14px; bottom: 92px; z-index: 2147483000; padding: 7px 10px; border: 1px solid #547487; border-radius: 8px; background: #142231; color: #d6eaf6; font: 700 11px system-ui, sans-serif; cursor: pointer; box-shadow: 0 5px 16px rgba(0,0,0,0.5); transition: all 0.2s ease; }
+      #piw-bridge:hover { background: #1c3147; border-color: #79a8c4; }
+      #piw-bridge.linked { border-color: #22c55e; background: #064e3b; color: #a7f3d0; }
     `;
     (document.head || document.documentElement).append(style);
+  }
+
+  function renderBridgeButton() {
+    if (!document.body || !location.pathname.startsWith('/play')) return;
+    let button = document.getElementById('piw-bridge');
+    const linked = store.getItem(ACCOUNT_KEY);
+    if (!readTokens()) { button?.remove(); return; }
+    if (!button) {
+      button = document.createElement('button');
+      button.id = 'piw-bridge';
+      button.type = 'button';
+      document.body.append(button);
+      button.addEventListener('click', async (e) => {
+        if (e.shiftKey || e.altKey) {
+          const newUrl = prompt('URL do Cockpit (ex: http://192.168.100.103:8787):', COCKPIT);
+          if (newUrl) {
+            COCKPIT = newUrl.trim().replace(/\/+$/, '');
+            localStorage.setItem('piw:cockpit_url', COCKPIT);
+            alert(`Cockpit configurado para: ${COCKPIT}`);
+          }
+          return;
+        }
+        if (store.getItem(ACCOUNT_KEY)) return window.open(COCKPIT, 'piw-cockpit');
+        button.disabled = true;
+        try {
+          const result = await cockpit('POST', '/api/bridge/register', { tokens: readTokens(), cmid: machineId });
+          store.setItem(ACCOUNT_KEY, result.id);
+          renderBridgeButton();
+          alert(`Conta cadastrada com sucesso no Cockpit (${COCKPIT})!`);
+        } catch (error) {
+          const newUrl = prompt(`Não foi possível conectar ao Cockpit em ${COCKPIT}.\nConfirme o endereço IP do servidor Gandalf:`, 'http://192.168.100.103:8787');
+          if (newUrl) {
+            COCKPIT = newUrl.trim().replace(/\/+$/, '');
+            localStorage.setItem('piw:cockpit_url', COCKPIT);
+            try {
+              const res2 = await cockpit('POST', '/api/bridge/register', { tokens: readTokens(), cmid: machineId });
+              store.setItem(ACCOUNT_KEY, res2.id);
+              renderBridgeButton();
+              alert(`Conectado ao Cockpit com sucesso em: ${COCKPIT}!`);
+            } catch (err2) {
+              alert(`Erro: ${err2.message}`);
+            }
+          }
+        } finally {
+          button.disabled = false;
+        }
+      });
+    }
+    const text = linked ? '🔗 Cockpit' : '🔗 Enviar para o cockpit';
+    if (button.textContent !== text) {
+      button.textContent = text;
+      button.title = linked ? 'Conta ligada ao cockpit. Clique para abrir o painel.' : 'Cadastra esta conta no cockpit (Gandalf).';
+      button.className = linked ? 'linked' : '';
+    }
   }
 
   function start() {
     installStyle();
     renderHud();
+    renderBridgeButton();
     watchTooltips();
 
     new MutationObserver(records => {
       renderHud();
+      renderBridgeButton();
       if (records.some(r => {
         const target = r.target.nodeType === 1 ? r.target : r.target.parentElement;
         return !target?.closest?.('.piw-tags') && !target?.closest?.('#piw-hud');
