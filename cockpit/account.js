@@ -292,6 +292,19 @@ class Account extends EventEmitter {
         this.authFailures = 0;
         this.applyPokes(Array.isArray(message.list) ? message.list : []);
         break;
+      case 'pokes-chunk': {
+        // Coleções grandes chegam em pedaços (gen/seq/total); só aplica quando completa.
+        if (!this.pokeChunks || this.pokeChunks.gen !== message.gen) this.pokeChunks = { gen: message.gen, parts: new Map() };
+        this.pokeChunks.parts.set(message.seq, Array.isArray(message.list) ? message.list : []);
+        if (this.pokeChunks.parts.size >= message.total) {
+          const list = [];
+          for (let i = 0; i < message.total; i++) list.push(...(this.pokeChunks.parts.get(i) ?? []));
+          this.pokeChunks = null;
+          this.authFailures = 0;
+          this.applyPokes(list);
+        }
+        break;
+      }
       case 'poke-delta':
         this.applyDelta(message.poke);
         break;
