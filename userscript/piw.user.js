@@ -220,29 +220,7 @@
 
   // ---------------- Interceptador de WebSocket ----------------
 
-  function extrairShiniesDoPacote(obj, depth = 0, lista = []) {
-    if (!obj || typeof obj !== 'object' || depth > 5) return lista;
-    const isShiny = obj.shiny === true || obj.isShiny === true || obj.shiny_state === true || obj.rarity === 'shiny' || (obj.name && /shiny|✨/i.test(obj.name));
-    const isDead = Boolean(obj.dead || obj.isDead || obj.killed || (obj.hp != null && Number(obj.hp) <= 0));
-    if (isShiny && !isDead) {
-      lista.push(obj);
-    }
-    if (Array.isArray(obj)) {
-      for (const item of obj) extrairShiniesDoPacote(item, depth + 1, lista);
-    } else {
-      if (Array.isArray(obj.mobs)) {
-        for (const item of obj.mobs) extrairShiniesDoPacote(item, depth + 1, lista);
-      }
-      for (const k of Object.keys(obj)) {
-        if (k === 'mobs') continue;
-        const val = obj[k];
-        if (val && typeof val === 'object' && depth < 3) {
-          extrairShiniesDoPacote(val, depth + 1, lista);
-        }
-      }
-    }
-    return lista;
-  }
+
 
   function extrairDanosDoPacote(obj, depth = 0, lista = []) {
     if (!obj || typeof obj !== 'object' || depth > 5) return lista;
