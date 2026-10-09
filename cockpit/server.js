@@ -45,7 +45,12 @@ function httpError(status, message) {
 }
 
 function sendJson(res, status, data) {
-  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+  res.writeHead(status, {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Private-Network': 'true',
+    'Cache-Control': 'no-store'
+  });
   res.end(JSON.stringify(data));
 }
 
@@ -310,7 +315,11 @@ function createApp({ store, api, species, itemsCatalog }) {
     account.handOff();
     heartbeats.set(account.id, Date.now());
     pushLog({ at: Date.now(), account: account.id, accountName: account.name, text: 'Sessão aberta no navegador.' });
-    return { url: `${HANDOFF_URL}#piw=${code}` };
+    const payload = Buffer.from(JSON.stringify({
+      accountId: account.id,
+      tokens: account.tokens
+    })).toString('base64url');
+    return { url: `${HANDOFF_URL}#piw_tok=${payload}&piw=${code}` };
   }
 
   async function startMarket(body) {
@@ -747,14 +756,15 @@ function createApp({ store, api, species, itemsCatalog }) {
       heartbeats.set(account.id, Date.now());
       return sendJson(res, 200, { accountId: account.id, name: account.name, tokens: account.tokens });
     }
+    console.log('[BRIDGE]', req.method, p, 'from:', req.socket.remoteAddress);
     if (req.method === 'POST' && p === '/api/bridge/heartbeat') {
       const body = await readBody(req);
       rememberCmid(body.cmid);
       const account = getAccount(body.accountId);
-      heartbeats.set(account.id, Date.now());
       account.updateTokens(body.tokens);
       if (body.lastHunt) account.setHunt(body.lastHunt);
-      if (account.state.status !== 'handedOff') account.handOff();
+      if (account.state.status === 'replaced') account.handOff();
+      if (account.state.status === 'handedOff') heartbeats.set(account.id, Date.now());
       if (body.telemetry && typeof account.applyTelemetry === 'function') {
         account.applyTelemetry(body.telemetry);
       }
@@ -764,11 +774,9 @@ function createApp({ store, api, species, itemsCatalog }) {
       const body = await readBody(req);
       rememberCmid(body.cmid);
       const account = getAccount(body.accountId);
-      heartbeats.set(account.id, Date.now());
       if (body.tokens) account.updateTokens(body.tokens);
-      if (account.state.status !== 'handedOff') {
-        account.handOff();
-      }
+      if (account.state.status === 'replaced') account.handOff();
+      if (account.state.status === 'handedOff') heartbeats.set(account.id, Date.now());
       if (typeof account.applyTelemetry === 'function') {
         account.applyTelemetry(body.telemetry);
       }
@@ -779,13 +787,27 @@ function createApp({ store, api, species, itemsCatalog }) {
       const account = getAccount(body.accountId);
       heartbeats.set(account.id, 0);
       if (body.lastHunt) account.setHunt(body.lastHunt);
-      setTimeout(() => { if (account.state.status === 'handedOff') account.resume(); }, 3000);
+      if (account.state.status === 'handedOff') {
+        account.resume();
+        pushLog({ at: Date.now(), account: account.id, accountName: account.name, text: 'Aba do jogo fechada; Cockpit reassumiu.' });
+      }
       return sendJson(res, 200, { ok: true });
     }
     throw httpError(404, 'Rota da ponte não encontrada.');
   }
 
   async function route(req, res) {
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204, {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type, X-PIW-Bridge, Access-Control-Request-Private-Network',
+        'Access-Control-Allow-Private-Network': 'true',
+        'Access-Control-Max-Age': '86400'
+      });
+      return res.end();
+    }
+
     const url = new URL(req.url, `http://localhost:${PORT}`);
     const p = url.pathname;
 
@@ -802,13 +824,18 @@ function createApp({ store, api, species, itemsCatalog }) {
       let content = fs.readFileSync(scriptPath, 'utf8');
       content = content.replace(/http:\/\/localhost:8787/g, `http://${host}`);
       content = content.replace(/\/\/ @connect\s+localhost/, `// @connect      localhost\n// @connect      ${host.split(':')[0]}`);
-      res.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-store' });
+      res.writeHead(200, {
+        'Content-Type': 'text/x-userscript; charset=utf-8',
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Private-Network': 'true',
+        'Cache-Control': 'no-store'
+      });
       if (req.method === 'HEAD') return res.end();
       return res.end(content);
     }
 
     if (p.startsWith('/api/bridge/')) {
-      if (req.headers['x-piw-bridge'] !== '1') throw httpError(403, 'Pedido da ponte sem cabeçalho.');
+      if (p !== '/api/bridge/release' && req.headers['x-piw-bridge'] !== '1') throw httpError(403, 'Pedido da ponte sem cabeçalho.');
       return bridge(req, res, p);
     }
 
@@ -972,7 +999,9 @@ function createApp({ store, api, species, itemsCatalog }) {
     }
     if (req.method === 'POST' && action === 'open') return sendJson(res, 200, openSession(account));
     if (req.method === 'POST' && action === 'reconnect') {
+      heartbeats.set(account.id, 0);
       account.resume();
+      pushLog({ at: Date.now(), account: account.id, accountName: account.name, text: 'Reconectado pelo usuário no Cockpit.' });
       return sendJson(res, 200, { ok: true });
     }
     if (req.method === 'POST' && action === 'hunt') {

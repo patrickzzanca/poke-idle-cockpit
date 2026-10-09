@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PIW Cockpit — Ponte, HUD & Tags
 // @namespace    pk-ext
-// @version      2.2.0
+// @version      2.2.1
 // @description  Liga as abas do Poke Idle World ao cockpit local, exibe HUD de hunt retrátil com radar de shiny, tags unificadas e leitor de IVs.
 // @match        https://poke.idleworld.online/*
 // @match        https://*.idleworld.online/*
@@ -236,6 +236,7 @@
   const SHINY_SOUND_URL = 'https://www.myinstants.com/media/sounds/legends-arceus-shiny-noise.mp3';
 
   let machineId = null;
+  let cockpitRunningHeadless = false;
   let currentHunt = null;
   let currentHuntName = null;
   let lastKillAt = 0;
@@ -318,13 +319,32 @@
     } catch { return null; }
   }
 
-  // "Abrir sessão": troca de código handoff pelos tokens.
+  // "Abrir sessão": troca de código handoff ou token embutido pelos tokens.
+  const tokHandoff = location.hash.match(/[#&]piw_tok=([A-Za-z0-9_-]+)/);
+  if (tokHandoff) {
+    try {
+      const jsonStr = decodeURIComponent(escape(atob(tokHandoff[1].replace(/-/g, '+').replace(/_/g, '/'))));
+      const data = JSON.parse(jsonStr);
+      if (data?.tokens?.accessToken) {
+        store.setItem(TOKENS_KEY, JSON.stringify(data.tokens));
+        try { page.localStorage.setItem(TOKENS_KEY, JSON.stringify(data.tokens)); } catch {}
+        store.setItem(ACCOUNT_KEY, data.accountId);
+        history.replaceState(null, '', location.pathname + location.search);
+        location.replace('/play');
+        return;
+      }
+    } catch (e) {
+      console.warn('Erro ao decodificar piw_tok:', e);
+    }
+  }
+
   const handoff = location.hash.match(/[#&]piw=([a-f0-9]{32})/);
   if (handoff) {
-    history.replaceState(null, '', location.pathname + location.search);
     cockpit('GET', `/api/bridge/claim/${handoff[1]}`).then(data => {
       store.setItem(TOKENS_KEY, JSON.stringify(data.tokens));
+      try { page.localStorage.setItem(TOKENS_KEY, JSON.stringify(data.tokens)); } catch {}
       store.setItem(ACCOUNT_KEY, data.accountId);
+      history.replaceState(null, '', location.pathname + location.search);
       location.replace('/play');
     }).catch(error => alert(`PIW Cockpit: ${error.message}`));
     return;
@@ -355,8 +375,9 @@
     };
     pokesChanged = false;
 
-    cockpit('POST', '/api/bridge/telemetry', payload).then(() => {
+    cockpit('POST', '/api/bridge/telemetry', payload).then(res => {
       cockpitConnected = true;
+      cockpitRunningHeadless = res?.status === 'online';
       updateHudStatus();
     }).catch(error => {
       if (error.status === 404) {
@@ -396,6 +417,12 @@
   page.addEventListener('pagehide', () => {
     const accountId = store.getItem(ACCOUNT_KEY);
     if (accountId && location.pathname.startsWith('/play')) {
+      try {
+        if (navigator.sendBeacon) {
+          const blob = new Blob([JSON.stringify({ accountId, lastHunt: currentHunt })], { type: 'application/json' });
+          navigator.sendBeacon(`${COCKPIT}/api/bridge/release`, blob);
+        }
+      } catch {}
       cockpit('POST', '/api/bridge/release', { accountId, lastHunt: currentHunt }).catch(() => {});
     }
   });
@@ -1020,11 +1047,11 @@
     const dots = document.querySelectorAll('.piw-status-dot');
     dots.forEach(d => {
       d.className = `piw-status-dot ${cockpitConnected ? 'online' : 'standalone'}`;
-      d.title = cockpitConnected ? 'Cockpit Conectado' : 'Modo Standalone (Cockpit offline)';
+      d.title = cockpitConnected ? (cockpitRunningHeadless ? 'Cockpit Ativo (servidor jogando)' : 'Cockpit Conectado') : 'Modo Standalone (Cockpit offline)';
     });
     const statusText = document.getElementById('piw-bridge-status');
     if (statusText) {
-      statusText.textContent = cockpitConnected ? '🟢 Sincronizado ao Cockpit' : '🟡 Modo Local';
+      statusText.textContent = cockpitConnected ? (cockpitRunningHeadless ? '🟢 Cockpit no servidor' : '🟢 Sincronizado ao Cockpit') : '🟡 Modo Local';
     }
   }
 
