@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PIW Cockpit — Ponte, HUD & Tags
 // @namespace    pk-ext
-// @version      2.2.2
+// @version      2.2.3
 // @description  Liga as abas do Poke Idle World ao cockpit local, exibe HUD de hunt retrátil com radar de shiny, tags unificadas e leitor de IVs.
 // @match        https://poke.idleworld.online/*
 // @match        https://*.idleworld.online/*
@@ -228,8 +228,9 @@
     localStorage.setItem('piw:cockpit_url', savedUrl);
   }
   let COCKPIT = savedUrl;
-  const page = unsafeWindow;
-  const store = page.sessionStorage;
+  console.log('[PIW Cockpit] 2.2.3 iniciado em', location.href.split('#')[0]);
+  const page = (typeof unsafeWindow !== 'undefined' && unsafeWindow) ? unsafeWindow : window;
+  const store = (page && page.sessionStorage) ? page.sessionStorage : window.sessionStorage;
   const TOKENS_KEY = 'pokeweb:tokens';
   const ACCOUNT_KEY = 'piw:accountId';
   const HUD_STATE_KEY = 'piw:hud:state';
