@@ -504,7 +504,7 @@ function createApp({ store, api, species, itemsCatalog }) {
       account = list[0];
     }
 
-    if (cachedItemsMarket && now - lastItemsMarketFetch < 15 * 1000) {
+    if (cachedItemsMarket && now - lastItemsMarketFetch < 45 * 1000) {
       return formatItemsMarketSummary(cachedItemsMarket, account);
     }
 
@@ -517,8 +517,6 @@ function createApp({ store, api, species, itemsCatalog }) {
   async function getAccountBag(account, fresh = false) {
     if (fresh || !account.inventory) {
       await account.fetchBag(1200);
-    } else {
-      account.refreshBag();
     }
 
     const rawInv = account.inventory ?? [];

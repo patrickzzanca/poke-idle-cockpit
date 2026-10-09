@@ -9,8 +9,7 @@ const SAMPLES_DIR = path.join(__dirname, '.cache', 'samples');
 const FATAL_CODES = {
   4006: 'Limite de conexões por IP atingido.',
   4007: 'Limite de conexões por máquina atingido.',
-  4008: 'Nome bloqueado: entre no jogo para resolver.',
-  4009: 'O jogo pede troca de senha: entre no jogo.'
+  4008: 'Nome bloqueado: entre no jogo para resolver.'
 };
 const SESSION_EXPIRED = 'Sessão expirou: faça login no jogo e envie a conta para o cockpit de novo.';
 
@@ -234,6 +233,11 @@ class Account extends EventEmitter {
     if (code === 4003) {
       const msg = reason === 'wrong-shard' ? 'Shard incorreto (wrong-shard).' : 'Jogo em manutenção.';
       this.scheduleReconnect(msg);
+      return;
+    }
+    if (code === 4009) {
+      this.log('Conexão temporariamente pausada pelo jogo (código 4009). Reconectando com backoff...');
+      this.scheduleReconnect('Desconectado temporariamente pelo jogo (código 4009).');
       return;
     }
     if (FATAL_CODES[code]) return this.fail(FATAL_CODES[code]);

@@ -3099,10 +3099,20 @@ function connectEvents() {
       playRadarChime();
     }
   });
+  let bagInventoryDebounce = null;
   source.addEventListener('inventory', e => {
     const data = JSON.parse(e.data);
     if (state.tab === 'bag' && (!data?.accountId || data.accountId === state.bag.accountId)) {
-      loadBag();
+      if (bagInventoryDebounce) return;
+      bagInventoryDebounce = setTimeout(async () => {
+        bagInventoryDebounce = null;
+        if (state.tab !== 'bag' || !state.bag.accountId) return;
+        try {
+          const bagData = await api(`/api/accounts/${state.bag.accountId}/bag`);
+          state.bag.items = Array.isArray(bagData?.items) ? bagData.items : [];
+          renderBag();
+        } catch {}
+      }, 5000);
     }
   });
   source.addEventListener('route-status', e => {
