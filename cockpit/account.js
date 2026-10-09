@@ -174,6 +174,8 @@ class Account extends EventEmitter {
       this.setState({ status: 'online', error: null, offlineSince: null, connectedAt: Date.now() });
       this.log('Conectada.');
       for (const type of ['pokes-get', 'autohelper-get', 'balls-get', 'analyzer-get', 'inv-get']) this.send({ type });
+      // Se após 5 segundos a coleção ainda não carregou, reenvia pokes-get
+      setTimeout(() => { if (!this.stopped && (!this.pokes || this.pokes.length < 15)) this.send({ type: 'pokes-get' }); }, 5000);
       // Aguarda hunt-resume do servidor para respeitar a hunt iniciada no navegador.
       // Se após 3s o servidor não enviar hunt-resume nem field-init, usa a última hunt conhecida.
       clearTimeout(this.timers.huntFallback);
@@ -290,10 +292,14 @@ class Account extends EventEmitter {
     switch (message.type) {
       case 'pokes':
         this.authFailures = 0;
-        this.applyPokes(Array.isArray(message.list) ? message.list : []);
+        this.log(`Mensagem 'pokes' recebida com ${Array.isArray(message.list) ? message.list.length : 0} pokémons.`);
+        // Se a coleção já possui mais de 20 pokémons e recebemos uma lista minúscula (apenas time), não sobrescreve a coleção inteira
+        if (!this.pokes || this.pokes.length < 20 || (Array.isArray(message.list) && message.list.length >= 20)) {
+          this.applyPokes(Array.isArray(message.list) ? message.list : []);
+        }
         break;
       case 'pokes-chunk': {
-        // Coleções grandes chegam em pedaços (gen/seq/total); só aplica quando completa.
+        this.log(`Mensagem 'pokes-chunk' recebida: seq=${message.seq}/${message.total} (gen=${message.gen}) com ${Array.isArray(message.list) ? message.list.length : 0} pokémons.`);
         if (!this.pokeChunks || this.pokeChunks.gen !== message.gen) this.pokeChunks = { gen: message.gen, parts: new Map() };
         this.pokeChunks.parts.set(message.seq, Array.isArray(message.list) ? message.list : []);
         if (this.pokeChunks.parts.size >= message.total) {
@@ -301,6 +307,7 @@ class Account extends EventEmitter {
           for (let i = 0; i < message.total; i++) list.push(...(this.pokeChunks.parts.get(i) ?? []));
           this.pokeChunks = null;
           this.authFailures = 0;
+          this.log(`Coleção completa montada a partir de chunks: ${list.length} pokémons.`);
           this.applyPokes(list);
         }
         break;
