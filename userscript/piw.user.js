@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PIW Cockpit — Ponte, HUD & Tags
 // @namespace    pk-ext
-// @version      2.2.3
+// @version      2.2.4
 // @description  Liga as abas do Poke Idle World ao cockpit local, exibe HUD de hunt retrátil com radar de shiny, tags unificadas e leitor de IVs.
 // @match        https://poke.idleworld.online/*
 // @match        https://*.idleworld.online/*
@@ -222,10 +222,11 @@
 
 
 
-  let savedUrl = localStorage.getItem('piw:cockpit_url');
+  let savedUrl = null;
+  try { savedUrl = localStorage.getItem('piw:cockpit_url'); } catch {}
   if (!savedUrl || savedUrl.includes('localhost') || savedUrl.includes('127.0.0.1')) {
     savedUrl = 'http://192.168.100.103:8787';
-    localStorage.setItem('piw:cockpit_url', savedUrl);
+    try { localStorage.setItem('piw:cockpit_url', savedUrl); } catch {}
   }
   let COCKPIT = savedUrl;
   console.log('[PIW Cockpit] 2.2.3 iniciado em', location.href.split('#')[0]);
@@ -1006,7 +1007,7 @@
 
     soundBtn?.addEventListener('click', () => {
       soundEnabled = !soundEnabled;
-      localStorage.setItem('piw:sound:enabled', String(soundEnabled));
+      try { localStorage.setItem('piw:sound:enabled', String(soundEnabled)); } catch {}
       if (soundBtn) soundBtn.textContent = soundEnabled ? '🔊' : '🔇';
     });
 
@@ -1284,7 +1285,7 @@
           const newUrl = prompt('URL do Cockpit (ex: http://192.168.100.103:8787):', COCKPIT);
           if (newUrl) {
             COCKPIT = newUrl.trim().replace(/\/+$/, '');
-            localStorage.setItem('piw:cockpit_url', COCKPIT);
+            try { localStorage.setItem('piw:cockpit_url', COCKPIT); } catch {}
             alert(`Cockpit configurado para: ${COCKPIT}`);
           }
           return;
@@ -1301,7 +1302,7 @@
           const newUrl = prompt(`Não foi possível conectar ao Cockpit em ${COCKPIT}.\nConfirme o endereço IP do servidor Gandalf:`, 'http://192.168.100.103:8787');
           if (newUrl) {
             COCKPIT = newUrl.trim().replace(/\/+$/, '');
-            localStorage.setItem('piw:cockpit_url', COCKPIT);
+            try { localStorage.setItem('piw:cockpit_url', COCKPIT); } catch {}
             try {
               const res2 = await cockpit('POST', '/api/bridge/register', { tokens: readTokens(), cmid: machineId });
               store.setItem(ACCOUNT_KEY, res2.id);
