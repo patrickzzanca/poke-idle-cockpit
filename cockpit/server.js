@@ -30,7 +30,7 @@ function isAllowedOrigin(origin) {
 }
 // A aba abre numa página sem login (Pokepedia); o userscript grava os tokens e segue para /play.
 const HANDOFF_URL = 'https://poke.idleworld.online/pokepedia';
-const HEARTBEAT_TIMEOUT = 90000;
+const HEARTBEAT_TIMEOUT = 300000; // 5 minutos de tolerancia para background em abas/celular
 const CACHE_DIR = path.join(__dirname, '.cache');
 const STATIC = {
   '/': ['public/index.html', 'text/html; charset=utf-8'],
@@ -754,7 +754,7 @@ function createApp({ store, api, species, itemsCatalog }) {
       heartbeats.set(account.id, Date.now());
       account.updateTokens(body.tokens);
       if (body.lastHunt) account.setHunt(body.lastHunt);
-      if (account.state.status === 'replaced') account.handOff();
+      if (account.state.status !== 'handedOff') account.handOff();
       if (body.telemetry && typeof account.applyTelemetry === 'function') {
         account.applyTelemetry(body.telemetry);
       }
@@ -766,7 +766,7 @@ function createApp({ store, api, species, itemsCatalog }) {
       const account = getAccount(body.accountId);
       heartbeats.set(account.id, Date.now());
       if (body.tokens) account.updateTokens(body.tokens);
-      if (account.state.status === 'replaced' || account.state.status === 'online') {
+      if (account.state.status !== 'handedOff') {
         account.handOff();
       }
       if (typeof account.applyTelemetry === 'function') {

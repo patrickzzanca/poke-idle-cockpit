@@ -488,19 +488,24 @@ class Account extends EventEmitter {
       this.emit('inventory', this.inventory);
     }
     if (Array.isArray(t.shinies)) {
+      if (!this.seenTelemetryShinies) this.seenTelemetryShinies = new Set();
       for (const s of t.shinies) {
-        if (!s) continue;
-        const key = `${s.slot ?? '0'}_${s.speciesId ?? '0'}_${s.type ?? 'spawn'}`;
-        if (!this.activeShinies.has(key)) {
-          this.activeShinies.add(key);
+        if (!s || !s.speciesId) continue;
+        const key = s.id || `${s.speciesId}_${s.type || 'spawn'}_${Math.floor((s.timestamp || s.at || Date.now()) / 60000)}`;
+        if (!this.seenTelemetryShinies.has(key)) {
+          this.seenTelemetryShinies.add(key);
+          if (this.seenTelemetryShinies.size > 200) {
+            const first = this.seenTelemetryShinies.values().next().value;
+            this.seenTelemetryShinies.delete(first);
+          }
           this.emit('shiny-encounter', {
             type: s.type || 'spawn',
-            at: s.at || Date.now(),
+            at: s.at || s.timestamp || Date.now(),
             speciesId: s.speciesId,
-            speciesName: s.speciesName,
+            speciesName: s.name || s.speciesName,
             slot: s.slot
           });
-          this.log(`✨ SHINY DETECTADO NO NAVEGADOR: ${s.speciesName ?? s.speciesId}!`);
+          this.log(`✨ SHINY DETECTADO NO NAVEGADOR (${s.type || 'spawn'}): ${s.name ?? s.speciesName ?? s.speciesId}!`);
         }
       }
     }

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PIW Cockpit — Ponte, HUD & Tags
 // @namespace    pk-ext
-// @version      2.1.2
+// @version      2.1.3
 // @description  Liga as abas do Poke Idle World ao cockpit local, exibe HUD de hunt retrátil com radar de shiny, tags unificadas e leitor de IVs.
 // @match        https://poke.idleworld.online/*
 // @match        https://*.idleworld.online/*
@@ -51,8 +51,8 @@
   try {
     const savedSound = localStorage.getItem('piw:sound:enabled');
     if (savedSound !== null) soundEnabled = savedSound === 'true';
-    const savedShinies = localStorage.getItem('piw:shinies:session');
-    if (savedShinies) sessionShinies = JSON.parse(savedShinies) || [];
+    localStorage.removeItem('piw:shinies:session');
+    sessionShinies = [];
   } catch {}
 
   const { TAGS, classifyCollection, makeMarketClassifier, normalizePoke, primaryTag } = PIWClassifier;
@@ -182,6 +182,12 @@
   }
   setInterval(heartbeat, 15000);
   setTimeout(heartbeat, 3000);
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      sendTelemetry();
+    }
+  });
 
   page.addEventListener('pagehide', () => {
     const accountId = store.getItem(ACCOUNT_KEY);
@@ -330,21 +336,29 @@
         queueTelemetry();
       }
 
-      // 3. Spawns e Mobs (Detector de Shiny)
-      const shiniesNoPacote = extrairShiniesDoPacote(message);
-      if (shiniesNoPacote.length > 0) {
-        for (const mob of shiniesNoPacote) {
-          const key = `mob_${mob.slot ?? '0'}_sp_${mob.speciesId || mob.species || 'x'}`;
-          if (!activeMapShinies.has(key)) {
-            activeMapShinies.add(key);
-            registrarShinyEncontrado({
-              speciesId: mob.speciesId || mob.species,
-              name: mob.name || mob.pokemonName,
-              slot: mob.slot,
-              type: 'spawn'
-            });
-            playShinySound();
+      // 3. Spawns e Mobs (Detector de Shiny EXCLUSIVAMENTE em mobs da hunt)
+      if (message.type === 'field' && Array.isArray(message.mobs)) {
+        const currentMobKeys = new Set();
+        for (const mob of message.mobs) {
+          if (!mob || mob.dead || mob.respawning || (mob.hp != null && Number(mob.hp) <= 0)) continue;
+          const isShiny = Boolean(mob.shiny || mob.isShiny || mob.shiny_state || mob.rarity === 'shiny');
+          if (isShiny) {
+            const key = `mob_${mob.slot ?? '0'}_sp_${mob.speciesId || mob.species || 'x'}`;
+            currentMobKeys.add(key);
+            if (!activeMapShinies.has(key)) {
+              activeMapShinies.add(key);
+              registrarShinyEncontrado({
+                speciesId: mob.speciesId || mob.species,
+                name: mob.name || mob.pokemonName,
+                slot: mob.slot,
+                type: 'spawn'
+              });
+              playShinySound();
+            }
           }
+        }
+        for (const k of activeMapShinies) {
+          if (!currentMobKeys.has(k)) activeMapShinies.delete(k);
         }
         updateHud();
       }
