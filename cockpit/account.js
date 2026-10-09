@@ -471,8 +471,9 @@ class Account extends EventEmitter {
         }
       });
     }
+    // Com o cockpit online, a lista do próprio WS é a fonte da verdade; a de uma aba pode estar parcial/velha.
     if (Array.isArray(t.pokes)) {
-      this.applyPokes(t.pokes);
+      if (this.state.status !== 'online' || !this.pokes) this.applyPokes(t.pokes);
     } else if (t.pokeDelta) {
       this.applyDelta(t.pokeDelta);
     }
