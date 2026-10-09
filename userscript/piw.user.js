@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PIW Cockpit — Ponte, HUD & Tags
 // @namespace    pk-ext
-// @version      2.2.1
+// @version      2.2.2
 // @description  Liga as abas do Poke Idle World ao cockpit local, exibe HUD de hunt retrátil com radar de shiny, tags unificadas e leitor de IVs.
 // @match        https://poke.idleworld.online/*
 // @match        https://*.idleworld.online/*
@@ -314,8 +314,16 @@
 
   function readTokens() {
     try {
-      const tokens = JSON.parse(store.getItem(TOKENS_KEY) || 'null');
-      return tokens?.accessToken && tokens?.refreshToken ? tokens : null;
+      let raw = store.getItem(TOKENS_KEY);
+      if (!raw) {
+        try { raw = page.localStorage.getItem(TOKENS_KEY) || window.localStorage.getItem(TOKENS_KEY); } catch {}
+      }
+      const tokens = JSON.parse(raw || 'null');
+      if (tokens?.accessToken && tokens?.refreshToken) {
+        try { store.setItem(TOKENS_KEY, JSON.stringify(tokens)); } catch {}
+        return tokens;
+      }
+      return null;
     } catch { return null; }
   }
 
@@ -323,12 +331,21 @@
   const tokHandoff = location.hash.match(/[#&]piw_tok=([A-Za-z0-9_-]+)/);
   if (tokHandoff) {
     try {
-      const jsonStr = decodeURIComponent(escape(atob(tokHandoff[1].replace(/-/g, '+').replace(/_/g, '/'))));
+      let padded = tokHandoff[1].replace(/-/g, '+').replace(/_/g, '/');
+      while (padded.length % 4 !== 0) padded += '=';
+      const binary = atob(padded);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      const jsonStr = new TextDecoder().decode(bytes);
       const data = JSON.parse(jsonStr);
       if (data?.tokens?.accessToken) {
-        store.setItem(TOKENS_KEY, JSON.stringify(data.tokens));
-        try { page.localStorage.setItem(TOKENS_KEY, JSON.stringify(data.tokens)); } catch {}
+        const tokensJson = JSON.stringify(data.tokens);
+        store.setItem(TOKENS_KEY, tokensJson);
+        try { page.localStorage.setItem(TOKENS_KEY, tokensJson); } catch {}
+        try { window.localStorage.setItem(TOKENS_KEY, tokensJson); } catch {}
         store.setItem(ACCOUNT_KEY, data.accountId);
+        try { page.localStorage.setItem(ACCOUNT_KEY, data.accountId); } catch {}
+        try { window.localStorage.setItem(ACCOUNT_KEY, data.accountId); } catch {}
         history.replaceState(null, '', location.pathname + location.search);
         location.replace('/play');
         return;
@@ -341,9 +358,13 @@
   const handoff = location.hash.match(/[#&]piw=([a-f0-9]{32})/);
   if (handoff) {
     cockpit('GET', `/api/bridge/claim/${handoff[1]}`).then(data => {
-      store.setItem(TOKENS_KEY, JSON.stringify(data.tokens));
-      try { page.localStorage.setItem(TOKENS_KEY, JSON.stringify(data.tokens)); } catch {}
+      const tokensJson = JSON.stringify(data.tokens);
+      store.setItem(TOKENS_KEY, tokensJson);
+      try { page.localStorage.setItem(TOKENS_KEY, tokensJson); } catch {}
+      try { window.localStorage.setItem(TOKENS_KEY, tokensJson); } catch {}
       store.setItem(ACCOUNT_KEY, data.accountId);
+      try { page.localStorage.setItem(ACCOUNT_KEY, data.accountId); } catch {}
+      try { window.localStorage.setItem(ACCOUNT_KEY, data.accountId); } catch {}
       history.replaceState(null, '', location.pathname + location.search);
       location.replace('/play');
     }).catch(error => alert(`PIW Cockpit: ${error.message}`));
@@ -1249,10 +1270,9 @@
 
   function renderBridgeButton() {
     if (!document.body) return;
-    if (!readTokens() && !location.pathname.startsWith('/play')) return;
     let button = document.getElementById('piw-bridge');
-    const linked = store.getItem(ACCOUNT_KEY);
-    if (!readTokens()) { button?.remove(); return; }
+    const tokens = readTokens();
+    const linked = store.getItem(ACCOUNT_KEY) || (page.localStorage ? page.localStorage.getItem(ACCOUNT_KEY) : null);
     if (!button) {
       button = document.createElement('button');
       button.id = 'piw-bridge';
@@ -1268,7 +1288,8 @@
           }
           return;
         }
-        if (store.getItem(ACCOUNT_KEY)) return window.open(COCKPIT, 'piw-cockpit');
+        if (linked) return window.open(COCKPIT, 'piw-cockpit');
+        if (!readTokens()) return window.open(COCKPIT, 'piw-cockpit');
         button.disabled = true;
         try {
           const result = await cockpit('POST', '/api/bridge/register', { tokens: readTokens(), cmid: machineId });
@@ -1294,10 +1315,10 @@
         }
       });
     }
-    const text = linked ? '🔗 Cockpit' : '🔗 Enviar para o cockpit';
+    const text = linked ? '🔗 Cockpit' : (tokens ? '🔗 Enviar para o cockpit' : '🔗 Abrir Cockpit');
     if (button.textContent !== text) {
       button.textContent = text;
-      button.title = linked ? 'Conta ligada ao cockpit. Clique para abrir o painel.' : 'Cadastra esta conta no cockpit (Gandalf).';
+      button.title = linked ? 'Conta ligada ao cockpit. Clique para abrir o painel.' : (tokens ? 'Cadastra esta conta no cockpit (Gandalf).' : 'Abre o painel do Cockpit.');
       button.className = linked ? 'linked' : '';
     }
   }
