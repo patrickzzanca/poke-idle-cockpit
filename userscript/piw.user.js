@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PIW Cockpit — Ponte, HUD & Tags
 // @namespace    pk-ext
-// @version      2.1.3
+// @version      2.2.0
 // @description  Liga as abas do Poke Idle World ao cockpit local, exibe HUD de hunt retrátil com radar de shiny, tags unificadas e leitor de IVs.
 // @match        https://poke.idleworld.online/*
 // @match        https://*.idleworld.online/*
@@ -11,13 +11,216 @@
 // @updateURL    http://localhost:8787/piw.user.js
 // @downloadURL  http://localhost:8787/piw.user.js
 // @connect      localhost
+// @connect      127.0.0.1
+// @connect      192.168.100.103
 // @connect      *
-// @require      http://localhost:8787/shared/species.js
-// @require      http://localhost:8787/shared/classifier.js
 // ==/UserScript==
 
 (() => {
   'use strict';
+
+  // ==========================================
+  // EMBEDDED: PIWSpecies (Auto-Contido)
+  // ==========================================
+  // Índice das espécies a partir do /game/creatures.json do jogo.
+// UMD: funciona no Node (require) e no navegador (window.PIWSpecies).
+(function (root, factory) {
+  if (typeof module === 'object' && module.exports) module.exports = factory();
+  else root.PIWSpecies = factory();
+})(typeof globalThis !== 'undefined' ? globalThis : this, function () {
+  'use strict';
+
+  const STATS = [
+    ['baseHp', 'HP'], ['baseAtk', 'Ataque'], ['baseDef', 'Defesa'],
+    ['baseSpAtk', 'Atq. Esp.'], ['baseSpDef', 'Def. Esp.'], ['baseSpeed', 'Velocidade']
+  ];
+
+  function nameKey(name) {
+    return String(name ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
+      .replace(/^✨\s*/, '').replace(/^shiny\s+/, '')
+      .replaceAll('♀', 'f').replaceAll('♂', 'm').replace(/[^a-z0-9]/g, '');
+  }
+
+  function buildSpeciesIndex(creatures) {
+    const byId = new Map();
+    const byName = new Map();
+    const parent = new Map();
+    for (const c of creatures ?? []) {
+      byId.set(Number(c.pokeId), c);
+      byName.set(nameKey(c.name), c);
+    }
+    for (const c of creatures ?? []) {
+      const next = Number(c.evolvesToId);
+      if (next > 0 && byId.has(next) && !parent.has(next)) parent.set(next, Number(c.pokeId));
+    }
+
+    function get(id) { return byId.get(Number(id)) ?? null; }
+
+    function familyOf(id) {
+      let current = Number(id);
+      const seen = new Set();
+      while (parent.has(current) && !seen.has(current)) {
+        seen.add(current);
+        current = parent.get(current);
+      }
+      return current;
+    }
+
+    function profile(id) {
+      const c = get(id);
+      if (!c) return null;
+      const damaging = (c.attacks ?? []).filter(a => a.power > 0);
+      const physical = damaging.filter(a => a.category === 'PHYSICAL').length;
+      const special = damaging.filter(a => a.category === 'SPECIAL').length;
+      const category = physical > special * 1.5 ? 'physical' : special > physical * 1.5 ? 'special' : 'mixed';
+      const stats = STATS.map(([key, label]) => ({ key, label, value: c[key] ?? 0 }));
+      const sorted = [...stats].sort((a, b) => b.value - a.value);
+      return {
+        name: c.name,
+        types: [c.type1, c.type2].filter(Boolean).map(t => String(t).toLowerCase()),
+        category,
+        best: sorted[0].label,
+        worst: sorted[sorted.length - 1].label,
+        baseTotal: stats.reduce((sum, s) => sum + s.value, 0),
+        family: get(familyOf(id))?.name ?? c.name
+      };
+    }
+
+    return { get, byName: name => byName.get(nameKey(name)) ?? null, familyOf, profile, size: byId.size, all: () => [...byId.values()] };
+  }
+
+  return { buildSpeciesIndex, nameKey };
+});
+
+
+  // ==========================================
+  // EMBEDDED: PIWClassifier (Auto-Contido)
+  // ==========================================
+  // Tags unificadas (IV primeiro). Usado pelo cockpit, pelo mercado e pelo userscript.
+// UMD: funciona no Node (require) e no navegador (window.PIWClassifier).
+(function (root, factory) {
+  if (typeof module === 'object' && module.exports) module.exports = factory();
+  else root.PIWClassifier = factory();
+})(typeof globalThis !== 'undefined' ? globalThis : this, function () {
+  'use strict';
+
+  const DEFAULT_CONFIG = Object.freeze({
+    raroQuality: 1.7, topIv: 170, matrizIv: 165,
+    uparIv: 145, uparQuality: 1.5, lixoIv: 130, lixoQuality: 1.5
+  });
+
+  const TAGS = Object.freeze({
+    raro: { label: '💎 Raro', short: '💎', color: '#f0b71e' },
+    top: { label: '⭐ Top', short: '⭐', color: '#f6d66d' },
+    matriz: { label: '🧬 Matriz', short: '🧬', color: '#d8a9ff' },
+    upar: { label: '⬆ Upar', short: '⬆', color: '#75dca8' },
+    lixo: { label: '🗑 Lixo', short: '🗑', color: '#9aa6b3' }
+  });
+  const TAG_ORDER = ['raro', 'top', 'matriz', 'upar', 'lixo'];
+
+  function num(value) {
+    if (value == null || value === '') return null;
+    const n = Number(value);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  function normalizePoke(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    let ivTotal = num(raw.ivTotal ?? raw.totalIv);
+    if (ivTotal == null && raw.ivs && typeof raw.ivs === 'object') {
+      const values = Object.values(raw.ivs).map(num);
+      if (values.length === 6 && values.every(v => v != null)) ivTotal = values.reduce((a, b) => a + b, 0);
+    }
+    return {
+      id: raw.id ?? null,
+      speciesId: num(raw.speciesId ?? raw.pokeId ?? raw.dexId),
+      name: String(raw.name ?? ''),
+      level: num(raw.level),
+      quality: num(raw.quality),
+      ivTotal,
+      power: num(raw.power),
+      sellValue: num(raw.sellValue),
+      shiny: Boolean(raw.shiny || raw.isShiny || raw.rarity === 'shiny' || (raw.name && /shiny|✨/i.test(raw.name))),
+      isDitto: Boolean(raw.isDitto),
+      team: Boolean(raw.team),
+      starter: Boolean(raw.starter),
+      locked: Boolean(raw.locked)
+    };
+  }
+
+  function isBetter(a, b) {
+    if (!b) return true;
+    if (a.ivTotal !== b.ivTotal) return a.ivTotal > b.ivTotal;
+    return (a.quality ?? 0) > (b.quality ?? 0);
+  }
+
+  function bestByFamily(collection, familyOf) {
+    const best = new Map();
+    for (const p of collection) {
+      if (!p || p.ivTotal == null || p.speciesId == null) continue;
+      const family = familyOf(p.speciesId);
+      if (isBetter(p, best.get(family))) best.set(family, p);
+    }
+    return best;
+  }
+
+  // ctx: { familyOf, best (Map família → melhor), config, market }
+  function classify(poke, ctx) {
+    const config = { ...DEFAULT_CONFIG, ...(ctx.config || {}) };
+    const tags = [];
+    const reasons = [];
+    const iv = poke.ivTotal;
+    const q = poke.quality;
+
+    if (poke.shiny || poke.isDitto || (q != null && q >= config.raroQuality)) {
+      tags.push('raro');
+      reasons.push(poke.shiny ? 'shiny' : poke.isDitto ? 'Ditto' : `Q ${q.toFixed(2)}`);
+    }
+    if (iv != null && poke.speciesId != null && ctx.familyOf && ctx.best) {
+      const best = ctx.best.get(ctx.familyOf(poke.speciesId));
+      const isTop = iv >= config.topIv &&
+        (ctx.market ? isBetter(poke, best) : Boolean(best) && best.id === poke.id);
+      if (isTop) {
+        tags.push('top');
+        reasons.push(ctx.market ? `superaria seu melhor da linha (IV ${best ? best.ivTotal : '—'})` : `melhor IV da linha (${iv})`);
+      }
+    }
+    if (iv != null && iv >= config.matrizIv) {
+      tags.push('matriz');
+      reasons.push(`IV ${iv} para breeding`);
+    }
+    if (iv != null && q != null && iv >= config.uparIv && q >= config.uparQuality) {
+      tags.push('upar');
+      reasons.push(`IV ${iv} e Q ${q.toFixed(2)}`);
+    }
+    const isProtected = poke.team || poke.starter || poke.locked;
+    if (!ctx.market && !tags.length && !isProtected && iv != null && q != null &&
+        iv < config.lixoIv && q < config.lixoQuality) {
+      tags.push('lixo');
+      reasons.push(`IV ${iv} e Q ${q.toFixed(2)} baixos`);
+    }
+    return { tags, reasons };
+  }
+
+  function classifyCollection(rawList, { familyOf = id => id, config } = {}) {
+    const pokes = (rawList ?? []).map(normalizePoke).filter(Boolean);
+    const best = bestByFamily(pokes, familyOf);
+    return pokes.map(p => ({ ...p, ...classify(p, { familyOf, best, config }) }));
+  }
+
+  function makeMarketClassifier(rawCollection, { familyOf = id => id, config } = {}) {
+    const best = bestByFamily((rawCollection ?? []).map(normalizePoke).filter(Boolean), familyOf);
+    return poke => classify(poke, { familyOf, best, config, market: true });
+  }
+
+  function primaryTag(tags) {
+    return TAG_ORDER.find(t => tags.includes(t)) ?? null;
+  }
+
+  return { DEFAULT_CONFIG, TAGS, TAG_ORDER, normalizePoke, isBetter, bestByFamily, classify, classifyCollection, makeMarketClassifier, primaryTag };
+});
+
+
 
   let savedUrl = localStorage.getItem('piw:cockpit_url');
   if (!savedUrl || savedUrl.includes('localhost') || savedUrl.includes('127.0.0.1')) {
@@ -55,7 +258,8 @@
     sessionShinies = [];
   } catch {}
 
-  const { TAGS, classifyCollection, makeMarketClassifier, normalizePoke, primaryTag } = PIWClassifier;
+  const classifierLib = typeof PIWClassifier !== 'undefined' ? PIWClassifier : (typeof globalThis !== 'undefined' ? globalThis.PIWClassifier : null);
+  const { TAGS, classifyCollection, makeMarketClassifier, normalizePoke, primaryTag } = classifierLib || {};
 
   // ---------------- Som de Shiny ----------------
 
@@ -639,7 +843,8 @@
   }
 
   function renderHud() {
-    if (hudEl || !document.body || !location.pathname.startsWith('/play')) return;
+    if (hudEl || !document.body) return;
+    if (!readTokens() && !location.pathname.startsWith('/play')) return;
 
     hudEl = document.createElement('div');
     hudEl.id = 'piw-hud';
@@ -1016,7 +1221,8 @@
   }
 
   function renderBridgeButton() {
-    if (!document.body || !location.pathname.startsWith('/play')) return;
+    if (!document.body) return;
+    if (!readTokens() && !location.pathname.startsWith('/play')) return;
     let button = document.getElementById('piw-bridge');
     const linked = store.getItem(ACCOUNT_KEY);
     if (!readTokens()) { button?.remove(); return; }
