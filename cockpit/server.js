@@ -756,7 +756,6 @@ function createApp({ store, api, species, itemsCatalog }) {
       heartbeats.set(account.id, Date.now());
       return sendJson(res, 200, { accountId: account.id, name: account.name, tokens: account.tokens });
     }
-    console.log('[BRIDGE]', req.method, p, 'from:', req.socket.remoteAddress);
     if (req.method === 'POST' && p === '/api/bridge/heartbeat') {
       const body = await readBody(req);
       rememberCmid(body.cmid);
