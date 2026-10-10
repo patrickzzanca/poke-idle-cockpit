@@ -1,5 +1,7 @@
 'use strict';
 
+const logger = require('./logger.js');
+
 const ORIGIN = 'https://poke.idleworld.online';
 
 class GameApiError extends Error {
@@ -13,6 +15,7 @@ class GameApiError extends Error {
 function createGameApi({ fetchImpl = globalThis.fetch, origin = ORIGIN } = {}) {
   async function request(path, { method = 'GET', token, body, signal } = {}) {
     let response;
+    const startTime = Date.now();
     try {
       response = await fetchImpl(origin + path, {
         method, signal,
@@ -23,11 +26,18 @@ function createGameApi({ fetchImpl = globalThis.fetch, origin = ORIGIN } = {}) {
         body: body ? JSON.stringify(body) : undefined
       });
     } catch (error) {
+      const elapsed = Date.now() - startTime;
       if (error?.name === 'AbortError') throw error;
+      logger.error('API', `${method} ${path} falhou (${elapsed}ms): ${error.message}`);
       throw new GameApiError(`Sem conexão com o jogo (${error.message}).`, 0);
     }
+    const elapsed = Date.now() - startTime;
     const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new GameApiError(data?.message || `O jogo respondeu HTTP ${response.status}.`, response.status);
+    if (!response.ok) {
+      logger.error('API', `${method} ${path} HTTP ${response.status} (${elapsed}ms)`, { message: data?.message });
+      throw new GameApiError(data?.message || `O jogo respondeu HTTP ${response.status}.`, response.status);
+    }
+    if (elapsed > 2000) logger.warn('API', `${method} ${path} lento (${elapsed}ms)`);
     return data;
   }
 

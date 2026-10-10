@@ -1,5 +1,7 @@
 'use strict';
 
+const logger = require('./logger.js');
+
 const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -848,6 +850,11 @@ function createApp({ store, api, species, itemsCatalog }) {
       return;
     }
 
+    if (req.method === 'GET' && p === '/api/debug/logs') {
+      const lines = Math.min(500, Math.max(10, Number(url.searchParams.get('n')) || 100));
+      return sendJson(res, 200, { lines: logger.getRecentLogs(lines) });
+    }
+
     if (req.method === 'GET' && p === '/api/state') {
       return sendJson(res, 200, {
         accounts: [...accounts.values()].map(summary),
@@ -1057,9 +1064,13 @@ async function main() {
     console.log(`Cockpit em ${url} (${species.size} espécies, ${itemsCatalog.list.length} itens carregados).`);
     for (const warning of store.warnings) console.warn(warning);
     if (process.platform === 'win32' && !process.env.PIW_NO_OPEN) exec(`start "" ${url}`);
+    logger.info('SERVER', `Cockpit iniciado em ${url} (${species.size} espécies carregadas).`);
     app.startAll();
   });
 }
+
+process.on('uncaughtException', err => logger.error('FATAL', 'Exceção não tratada', { message: err?.message, stack: err?.stack }));
+process.on('unhandledRejection', reason => logger.error('FATAL', 'Promise rejeitada não tratada', { reason: String(reason?.stack || reason) }));
 
 if (require.main === module) main();
 

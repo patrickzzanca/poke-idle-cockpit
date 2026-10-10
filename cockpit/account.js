@@ -1,5 +1,7 @@
 'use strict';
 
+const logger = require('./logger.js');
+
 const fs = require('node:fs');
 const path = require('node:path');
 const { EventEmitter } = require('node:events');
@@ -74,6 +76,7 @@ class Account extends EventEmitter {
   }
 
   log(text) {
+    logger.info(this.name, text);
     this.emit('log', { at: Date.now(), account: this.id, accountName: this.name, text });
   }
 
@@ -257,6 +260,7 @@ class Account extends EventEmitter {
     this.clearTimers();
     this.closeSocket();
     this.setState({ status: 'error', error: message });
+    logger.error(this.name, `Falha fatal da conta: ${message}`);
     this.log(message);
   }
 
