@@ -281,11 +281,41 @@
   // ---------------- Ponte com o cockpit ----------------
 
   function cockpit(method, path, body) {
+    const reqUrl = COCKPIT + path;
+    const reqHeaders = { 'Content-Type': 'application/json', 'X-PIW-Bridge': '1' };
+    const reqBody = body ? JSON.stringify(body) : undefined;
+
+    if (typeof window !== 'undefined' && typeof window.__piwCockpitBridge?.request === 'function') {
+      return window.__piwCockpitBridge.request({
+        method,
+        url: reqUrl,
+        headers: reqHeaders,
+        body: reqBody,
+        timeout: 8000
+      }).then(res => {
+        let data = {};
+        try { data = JSON.parse(res?.responseText || '{}'); } catch {}
+        if (res && res.status >= 200 && res.status < 300) {
+          cockpitConnected = true;
+          updateHudStatus();
+          return data;
+        }
+        cockpitConnected = false;
+        updateHudStatus();
+        throw Object.assign(new Error(data.error || res?.error || `Cockpit respondeu HTTP ${res?.status ?? 0}`), { status: res?.status ?? 0 });
+      });
+    }
+
     return new Promise((resolve, reject) => {
+      if (typeof GM_xmlhttpRequest !== 'function') {
+        cockpitConnected = false;
+        updateHudStatus();
+        return reject(new Error('Ponte HTTP indisponível.'));
+      }
       GM_xmlhttpRequest({
-        method, url: COCKPIT + path,
-        headers: { 'Content-Type': 'application/json', 'X-PIW-Bridge': '1' },
-        data: body ? JSON.stringify(body) : undefined,
+        method, url: reqUrl,
+        headers: reqHeaders,
+        data: reqBody,
         timeout: 8000,
         onload: res => {
           let data = {};
@@ -377,9 +407,9 @@
 
   let telemetryTimer = null;
   function sendTelemetry() {
-    const accountId = store.getItem(ACCOUNT_KEY);
+    const accountId = store.getItem(ACCOUNT_KEY) || undefined;
     const tokens = readTokens();
-    if (!accountId || !tokens) return;
+    if (!tokens) return;
 
     const payload = {
       accountId,
@@ -399,6 +429,9 @@
     pokesChanged = false;
 
     cockpit('POST', '/api/bridge/telemetry', payload).then(res => {
+      if (res?.accountId) {
+        try { store.setItem(ACCOUNT_KEY, res.accountId); } catch {}
+      }
       cockpitConnected = true;
       cockpitRunningHeadless = res?.status === 'online';
       updateHudStatus();
@@ -457,8 +490,12 @@
   let species = null;
   let ownedRaw = [];
   let owned = [];
+  let ownedBySpeciesId = new Map();
+  let ownedByName = new Map();
+  let collectionVersion = 0;
   let marketClassifier = null;
   let scanTimer = 0;
+  let rebuildTimer = 0;
 
   fetch('/game/creatures.json').then(r => r.json()).then(data => {
     species = PIWSpecies.buildSpeciesIndex(data.creatures);
@@ -466,24 +503,49 @@
   }).catch(() => {});
 
   function rebuild() {
+    rebuildTimer = 0;
     const familyOf = species ? species.familyOf : undefined;
     owned = classifyCollection(ownedRaw, { familyOf });
+    ownedBySpeciesId = new Map();
+    ownedByName = new Map();
+    for (const p of owned) {
+      if (p.speciesId != null) {
+        let list = ownedBySpeciesId.get(p.speciesId);
+        if (!list) { list = []; ownedBySpeciesId.set(p.speciesId, list); }
+        list.push(p);
+      }
+      const cname = cleanName(p.name);
+      if (cname) {
+        let nlist = ownedByName.get(cname);
+        if (!nlist) { nlist = []; ownedByName.set(cname, nlist); }
+        nlist.push(p);
+      }
+    }
+    collectionVersion++;
     marketClassifier = makeMarketClassifier(ownedRaw, { familyOf });
     queueScan();
   }
 
+  function queueRebuild() {
+    if (!rebuildTimer) rebuildTimer = setTimeout(rebuild, 300);
+  }
+
   // ---------------- Interceptador de WebSocket ----------------
 
-
+  const NON_COMBAT_TYPES = new Set([
+    'pokes', 'poke-delta', 'inventory', 'balls', 'analyzer',
+    'field', 'field-init', 'hunt-state', 'hunt-resume', 'field-kill', 'hunt-kill'
+  ]);
 
   function extrairDanosDoPacote(obj, depth = 0, lista = []) {
-    if (!obj || typeof obj !== 'object' || depth > 5) return lista;
+    if (!obj || typeof obj !== 'object' || depth > 4) return lista;
     const name = obj.moveName || obj.attackName || (typeof obj.move === 'string' ? obj.move : obj.move?.name);
     const dmg = Number(obj.damage ?? obj.dmg ?? obj.dano ?? obj.amount);
     if (typeof name === 'string' && name.trim() && Number.isFinite(dmg) && dmg > 0) {
       lista.push({ name: name.trim(), dmg, eff: obj.eff ? Number(obj.eff) : 1 });
     }
     if (Array.isArray(obj)) {
+      if (obj.length > 25) return lista;
       for (const item of obj) extrairDanosDoPacote(item, depth + 1, lista);
     } else {
       for (const val of Object.values(obj)) {
@@ -504,6 +566,15 @@
 
     const socket = new NativeWebSocket(...args);
     gameSocket = socket;
+
+    socket.addEventListener('open', () => {
+      setTimeout(() => {
+        if (socket.readyState === WebSocket.OPEN) {
+          if (ownedRaw.length === 0) socket.send(JSON.stringify({ type: 'pokes-get' }));
+          socket.send(JSON.stringify({ type: 'analyzer-get' }));
+        }
+      }, 1500);
+    });
 
     // Polling do analyzer a cada 15s pelo próprio socket do jogo
     const analyzerInterval = setInterval(() => {
@@ -538,20 +609,20 @@
       if (!message || typeof message !== 'object') return;
 
       // 1. Atualizações de Hunt
-      if ((message.type === 'field-init' || message.type === 'hunt-resume') && message.slug) {
-        currentHunt = String(message.slug);
-        if (message.name) currentHuntName = String(message.name);
+      if ((message.type === 'field-init' || message.type === 'hunt-resume' || message.type === 'hunt-state') && (message.slug || message.huntId)) {
+        currentHunt = String(message.slug || message.huntId);
+        if (message.name || message.zoneName) currentHuntName = String(message.name || message.zoneName);
         updateHud();
         queueTelemetry();
+        return;
       }
 
       // 2. Kills e Mobs
-      if (message.type === 'field-kill') {
+      if (message.type === 'field-kill' || message.type === 'hunt-kill') {
         lastKillAt = Date.now();
         const isShinyKill = Boolean(
           message.shiny || message.isShiny || message.rarity === 'shiny' ||
-          (message.speciesName && /shiny|✨/i.test(message.speciesName)) ||
-          [...activeMapShinies].some(k => k.includes(`_sp_${message.speciesId}`))
+          (message.speciesName && /shiny|✨/i.test(message.speciesName))
         );
         if (isShinyKill) {
           for (const key of activeMapShinies) {
@@ -566,6 +637,7 @@
         }
         updateHud();
         queueTelemetry();
+        return;
       }
 
       // 3. Spawns e Mobs (Detector de Shiny EXCLUSIVAMENTE em mobs da hunt)
@@ -593,6 +665,7 @@
           if (!currentMobKeys.has(k)) activeMapShinies.delete(k);
         }
         updateHud();
+        return;
       }
 
       // 4. Analisador da Sessão
@@ -616,6 +689,7 @@
         };
         updateHud();
         queueTelemetry();
+        return;
       }
 
       // 5. Coleção / Capturas
@@ -624,37 +698,44 @@
         pokesChanged = true;
         rebuild();
         queueTelemetry();
+        return;
       } else if (message.type === 'poke-delta' && message.poke?.id != null) {
         const i = ownedRaw.findIndex(p => p?.id === message.poke.id);
-        ownedRaw = i >= 0 ? ownedRaw.map((p, j) => j === i ? message.poke : p) : [...ownedRaw, message.poke];
+        if (i >= 0) ownedRaw[i] = message.poke;
+        else ownedRaw.push(message.poke);
         pokesChanged = true;
-        rebuild();
-        queueTelemetry(true);
+        queueRebuild();
+        queueTelemetry();
+        return;
       }
 
       // 6. Suprimentos (Bolas e Bag)
       if (message.type === 'balls') {
         latestBalls = { catalog: message.catalog || [], counts: message.counts || {} };
+        return;
       }
       if (message.type === 'inventory') {
         latestInventory = message.items || [];
+        return;
       }
 
-      // 7. Danos e Golpes
-      const danos = extrairDanosDoPacote(message);
-      if (danos.length > 0) {
-        for (const d of danos) {
-          const k = d.name.toLowerCase();
-          const prev = recentDamageMoves.get(k) || { count: 0, total: 0 };
-          recentDamageMoves.set(k, {
-            name: d.name,
-            lastDmg: d.dmg,
-            count: prev.count + 1,
-            total: prev.total + d.dmg,
-            eff: d.eff
-          });
+      // 7. Danos e Golpes (apenas em pacotes de combate)
+      if (!NON_COMBAT_TYPES.has(message.type)) {
+        const danos = extrairDanosDoPacote(message);
+        if (danos.length > 0) {
+          for (const d of danos) {
+            const k = d.name.toLowerCase();
+            const prev = recentDamageMoves.get(k) || { count: 0, total: 0 };
+            recentDamageMoves.set(k, {
+              name: d.name,
+              lastDmg: d.dmg,
+              count: prev.count + 1,
+              total: prev.total + d.dmg,
+              eff: d.eff
+            });
+          }
+          updateDamageSection();
         }
-        updateDamageSection();
       }
     });
 
@@ -753,13 +834,20 @@
       if (raw.iv == null || raw.q == null || !marketClassifier) return null;
       return marketClassifier(normalizePoke({ speciesId: speciesEntry?.pokeId, ivTotal: raw.iv, quality: raw.q, shiny: raw.shiny }));
     }
-    const candidates = owned.filter(p =>
-      (speciesEntry ? p.speciesId === speciesEntry.pokeId : cleanName(p.name) === raw.name) &&
+    const bucket = (speciesEntry ? ownedBySpeciesId.get(speciesEntry.pokeId) : ownedByName.get(raw.name)) || [];
+    const candidates = bucket.filter(p =>
       (raw.iv == null || p.ivTotal === raw.iv) &&
       (raw.level == null || p.level == null || p.level === raw.level) &&
       (raw.q == null || (p.quality != null && Math.abs(p.quality - raw.q) < 0.011)) &&
       (raw.kind !== 'team' || p.team));
-    return candidates.length === 1 ? candidates[0] : null;
+    if (candidates.length >= 1) return candidates[0];
+    if (raw.iv != null && classifierLib?.classify) {
+      return classifierLib.classify(
+        normalizePoke({ speciesId: speciesEntry?.pokeId, name: raw.name, ivTotal: raw.iv, quality: raw.q ?? 1.0, shiny: raw.shiny }),
+        { familyOf: species?.familyOf }
+      );
+    }
+    return null;
   }
 
   function showTags(card, raw, result) {
@@ -787,14 +875,20 @@
 
   function scan() {
     scanTimer = 0;
-    for (const card of document.querySelectorAll(CARD_SELECTOR)) {
+    const cards = document.querySelectorAll(CARD_SELECTOR);
+    for (let i = 0; i < cards.length; i++) {
+      const card = cards[i];
+      if (card._piwVer === collectionVersion && !card.classList.contains('inv-poke')) continue;
       const raw = readCard(card);
-      if (raw) showTags(card, raw, assess(raw));
+      if (raw) {
+        showTags(card, raw, assess(raw));
+        card._piwVer = collectionVersion;
+      }
     }
   }
 
   function queueScan() {
-    if (!scanTimer) scanTimer = setTimeout(scan, 150);
+    if (!scanTimer) scanTimer = setTimeout(scan, 250);
   }
 
   // ---------------- Leitor de Tooltips de Pokémon ----------------
@@ -804,7 +898,8 @@
     const text = tipEl.textContent || '';
     if (!text.includes('HP') && !text.includes('IV') && !text.includes('Quality') && !text.includes('Qualidade')) return;
 
-    const iv = readIv(text);
+    const hoveredCard = document.querySelector('.mks-row:hover, .dpt-poke-row:hover, .mkt2-card:hover, .mkt2-trow:hover');
+    const iv = readIv(text) ?? (hoveredCard ? readIv(hoveredCard.textContent || '') : null);
     const q = readQuality(text);
     const nameEl = tipEl.querySelector('.inv-tip-name, [class*="tip-name"]') || tipEl.firstElementChild;
     const pokeName = cleanName(nameEl?.textContent || '');
@@ -814,12 +909,17 @@
 
     const speciesEntry = species?.byName ? species.byName(pokeName) : null;
     const speciesId = speciesEntry?.pokeId;
-    const isOwned = speciesId != null
-      ? owned.some(p => p.speciesId === speciesId)
-      : owned.some(p => cleanName(p.name) === pokeName);
 
-    const matchCandidate = owned.find(p => (speciesId != null ? p.speciesId === speciesId : cleanName(p.name) === pokeName) && (iv == null || p.ivTotal === iv));
-    const tag = matchCandidate ? primaryTag(matchCandidate.tags) : null;
+    const bucket = (speciesId != null ? ownedBySpeciesId.get(speciesId) : ownedByName.get(pokeName)) || [];
+    const matchCandidate = bucket.find(p => iv == null || p.ivTotal === iv);
+    let tag = matchCandidate ? primaryTag(matchCandidate.tags) : null;
+    if (!tag && iv != null && classifierLib?.classify) {
+      const fallback = classifierLib.classify(
+        normalizePoke({ speciesId, name: pokeName, ivTotal: iv, quality: q ?? 1.0, shiny: /shiny|✨/i.test(text) }),
+        { familyOf: species?.familyOf }
+      );
+      tag = primaryTag(fallback.tags);
+    }
 
     const badge = document.createElement('div');
     badge.className = 'piw-tip-badge';
@@ -833,20 +933,6 @@
     tipEl.insertBefore(badge, tipEl.firstChild);
   }
 
-  function watchTooltips() {
-    const observer = new MutationObserver(records => {
-      for (const r of records) {
-        for (const n of r.addedNodes) {
-          if (n.nodeType === 1) {
-            if (n.matches?.('.inv-tip, .poke-tip, [class*="-tip"], [class*="tip-"]')) enhanceTooltip(n);
-            const inside = n.querySelectorAll?.('.inv-tip, .poke-tip, [class*="-tip"], [class*="tip-"]');
-            if (inside) inside.forEach(enhanceTooltip);
-          }
-        }
-      }
-    });
-    observer.observe(document.body, { childList: true, subtree: true });
-  }
 
   // ---------------- HUD In-Game (Card Retrátil Responsivo) ----------------
 
@@ -1329,16 +1415,29 @@
     installStyle();
     renderHud();
     renderBridgeButton();
-    watchTooltips();
 
+    const TIP_SELECTOR = '.inv-tip, .poke-tip, [class*="-tip"], [class*="tip-"]';
     new MutationObserver(records => {
-      renderHud();
-      renderBridgeButton();
-      if (records.some(r => {
+      if (!hudEl?.isConnected) renderHud();
+      if (!document.getElementById('piw-bridge')) renderBridgeButton();
+      let shouldScan = false;
+      for (let i = 0; i < records.length; i++) {
+        const r = records[i];
         const target = r.target.nodeType === 1 ? r.target : r.target.parentElement;
-        return !target?.closest?.('.piw-tags') && !target?.closest?.('#piw-hud');
-      })) queueScan();
-    }).observe(document.body, { childList: true, subtree: true, characterData: true });
+        if (!target || target.closest?.('.piw-tags') || target.closest?.('#piw-hud')) continue;
+        if (!shouldScan && target.matches?.(CARD_SELECTOR)) shouldScan = true;
+        const added = r.addedNodes;
+        for (let j = 0; j < added.length; j++) {
+          const n = added[j];
+          if (n.nodeType !== 1) continue;
+          if (n.matches?.(TIP_SELECTOR)) enhanceTooltip(n);
+          if (!shouldScan && (n.matches?.(CARD_SELECTOR) || n.querySelector?.(CARD_SELECTOR))) {
+            shouldScan = true;
+          }
+        }
+      }
+      if (shouldScan) queueScan();
+    }).observe(document.body, { childList: true, subtree: true });
 
     queueScan();
   }

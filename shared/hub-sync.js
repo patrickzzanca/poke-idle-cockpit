@@ -253,6 +253,24 @@ function bootstrapElectronHub({
     }
   });
 
+  try {
+    electron.ipcMain.removeHandler('cockpit:bridge-request');
+    electron.ipcMain.handle('cockpit:bridge-request', async (_event, reqOpts = {}) => {
+      try {
+        const res = await fetch(String(reqOpts.url || ''), {
+          method: reqOpts.method || 'GET',
+          headers: reqOpts.headers || { 'Content-Type': 'application/json', 'X-PIW-Bridge': '1' },
+          body: reqOpts.body,
+          signal: AbortSignal.timeout(Number(reqOpts.timeout) || 8000)
+        });
+        const responseText = await res.text();
+        return { ok: res.ok, status: res.status, responseText };
+      } catch (err) {
+        return { ok: false, status: 0, error: String(err?.message || err), responseText: '' };
+      }
+    });
+  } catch {}
+
   electron.app.on('before-quit', () => {
     hubSync.releaseAll().catch(() => {});
   });
