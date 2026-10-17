@@ -1,5 +1,8 @@
 'use strict';
 
+const fs = require('node:fs');
+const path = require('node:path');
+
 const DEFAULT_COCKPIT_URL = process.env.PIW_COCKPIT_URL || 'http://192.168.100.103:8787';
 
 function safeParseTokens(raw) {
@@ -24,12 +27,13 @@ function createHubSync({
   timeoutMs = 2500,
   getToken = () => null,
   setToken = () => {},
+  onAccountsSynced = null,
   fetchImpl = globalThis.fetch
 } = {}) {
   const baseUrl = String(cockpitUrl).replace(/\/+$/, '');
   const slotToAccount = new Map();
 
-  async function request(path, { method = 'GET', body } = {}) {
+  async function request(reqPath, { method = 'GET', body } = {}) {
     const headers = { 'X-PIW-Bridge': '1' };
     const opts = {
       method,
@@ -40,7 +44,7 @@ function createHubSync({
       headers['Content-Type'] = 'application/json';
       opts.body = JSON.stringify(body);
     }
-    const res = await fetchImpl(`${baseUrl}${path}`, opts);
+    const res = await fetchImpl(`${baseUrl}${reqPath}`, opts);
     if (!res.ok) {
       throw new Error(`HTTP ${res.status}`);
     }
@@ -52,6 +56,7 @@ function createHubSync({
       const data = await request('/api/bridge/accounts');
       const list = Array.isArray(data?.accounts) ? data.accounts.slice(0, 4) : [];
       let count = 0;
+      const syncedAccounts = [];
 
       for (let i = 0; i < list.length; i++) {
         const slot = i + 1;
@@ -61,12 +66,19 @@ function createHubSync({
 
         setToken(slot, JSON.stringify(tokens));
         slotToAccount.set(slot, { id: acc.id, name: acc.name, tokens });
+        syncedAccounts.push({ slot, id: acc.id, name: acc.name });
         count++;
 
         await request('/api/bridge/heartbeat', {
           method: 'POST',
           body: { accountId: acc.id, tokens }
         });
+      }
+
+      if (typeof onAccountsSynced === 'function' && syncedAccounts.length > 0) {
+        try {
+          onAccountsSynced(syncedAccounts);
+        } catch {}
       }
 
       return { ok: true, count };
@@ -142,18 +154,93 @@ function createHubSync({
   };
 }
 
-function bootstrapElectronHub({ electron, getToken, setToken, resolveSlot, cockpitUrl = DEFAULT_COCKPIT_URL } = {}) {
+let preReadyRunner = null;
+let origWhenReady = null;
+
+function preInit() {
+  try {
+    const electron = require('electron');
+    if (!electron?.app) return;
+    // Permite execucao a partir de unidades de rede (SMB/UNC como Z:\) sem crash do GPU/Renderer sandbox (error_code=18)
+    electron.app.commandLine.appendSwitch('no-sandbox');
+    electron.app.commandLine.appendSwitch('disable-gpu-sandbox');
+
+    if (!origWhenReady && typeof electron.app.whenReady === 'function') {
+      origWhenReady = electron.app.whenReady.bind(electron.app);
+      let wrappedPromise = null;
+      electron.app.whenReady = function () {
+        if (!wrappedPromise) {
+          wrappedPromise = origWhenReady().then(async () => {
+            if (typeof preReadyRunner === 'function') {
+              try {
+                await preReadyRunner();
+              } catch {}
+            }
+          });
+        }
+        return wrappedPromise;
+      };
+    }
+  } catch {}
+}
+
+function updateHubAjustesFile(electron, syncedAccounts, resetSettingsCache) {
+  try {
+    const userData = electron.app.getPath('userData');
+    const ajustesPath = path.join(userData, 'ajustes.json');
+    let data = {};
+    if (fs.existsSync(ajustesPath)) {
+      data = JSON.parse(fs.readFileSync(ajustesPath, 'utf8'));
+    }
+    if (!data.contas || typeof data.contas !== 'object') {
+      data.contas = {};
+    }
+    for (const item of syncedAccounts) {
+      const key = String(item.slot);
+      const prev = data.contas[key] || {};
+      data.contas[key] = {
+        ...prev,
+        ligada: true,
+        nome: item.name || prev.nome || null
+      };
+    }
+    fs.writeFileSync(ajustesPath, JSON.stringify(data, null, 2), 'utf8');
+    if (typeof resetSettingsCache === 'function') {
+      resetSettingsCache();
+    }
+  } catch {}
+}
+
+function bootstrapElectronHub({
+  electron,
+  getToken,
+  setToken,
+  resolveSlot,
+  resetSettingsCache,
+  cockpitUrl = DEFAULT_COCKPIT_URL
+} = {}) {
   if (!electron?.app || !electron?.ipcMain) return null;
 
-  const hubSync = createHubSync({ cockpitUrl, getToken, setToken });
+  const hubSync = createHubSync({
+    cockpitUrl,
+    getToken,
+    setToken,
+    onAccountsSynced: syncedAccounts => updateHubAjustesFile(electron, syncedAccounts, resetSettingsCache)
+  });
 
-  electron.app.whenReady().then(() => {
-    hubSync.syncFromCockpit().catch(() => {});
+  const startSyncAndHeartbeat = async () => {
+    await hubSync.syncFromCockpit().catch(() => {});
     const timer = setInterval(() => {
       hubSync.heartbeatAll().catch(() => {});
     }, 30_000);
     if (typeof timer.unref === 'function') timer.unref();
-  });
+  };
+
+  if (origWhenReady) {
+    preReadyRunner = startSyncAndHeartbeat;
+  } else {
+    electron.app.whenReady().then(startSyncAndHeartbeat);
+  }
 
   electron.ipcMain.on('jogo:tokens-mudou', (event, rawTokens) => {
     try {
@@ -176,5 +263,6 @@ function bootstrapElectronHub({ electron, getToken, setToken, resolveSlot, cockp
 module.exports = {
   createHubSync,
   bootstrapElectronHub,
+  preInit,
   DEFAULT_COCKPIT_URL
 };
