@@ -802,8 +802,8 @@ function createApp({ store, api, species, itemsCatalog }) {
       const account = await resolveBridgeAccount(body);
       account.updateTokens(body.tokens);
       if (body.lastHunt) account.setHunt(body.lastHunt);
-      if (account.state.status === 'replaced') account.handOff();
-      if (account.state.status === 'handedOff') heartbeats.set(account.id, Date.now());
+      if (account.state.status !== 'handedOff') account.handOff();
+      heartbeats.set(account.id, Date.now());
       if (body.telemetry && typeof account.applyTelemetry === 'function') {
         account.applyTelemetry(body.telemetry);
       }
