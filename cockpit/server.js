@@ -743,6 +743,34 @@ function createApp({ store, api, species, itemsCatalog }) {
     if (store.setCmid(cmid)) pushLog({ at: Date.now(), text: 'Impressão desta máquina (cmid) registrada; vale a partir da próxima conexão.' });
   }
 
+  async function resolveBridgeAccount(body) {
+    if (body?.accountId) {
+      const acc = accounts.get(body.accountId) || accounts.get(String(body.accountId).toLowerCase());
+      if (acc) return acc;
+    }
+    if (body?.accountName) {
+      const targetName = String(body.accountName).toLowerCase();
+      for (const acc of accounts.values()) {
+        if (String(acc.name || '').toLowerCase() === targetName) return acc;
+      }
+    }
+    if (body?.tokens) {
+      for (const acc of accounts.values()) {
+        if (
+          (body.tokens.refreshToken && acc.tokens?.refreshToken === body.tokens.refreshToken) ||
+          (body.tokens.accessToken && acc.tokens?.accessToken === body.tokens.accessToken)
+        ) {
+          return acc;
+        }
+      }
+      if (body.tokens.refreshToken) {
+        const reg = await registerAccount(body.tokens, { fromTab: true });
+        return getAccount(reg.id);
+      }
+    }
+    throw httpError(404, 'Conta não encontrada.');
+  }
+
   async function bridge(req, res, p) {
     if (req.method === 'GET' && p === '/api/bridge/accounts') {
       const list = [...accounts.values()].map(a => ({
@@ -771,7 +799,7 @@ function createApp({ store, api, species, itemsCatalog }) {
     if (req.method === 'POST' && p === '/api/bridge/heartbeat') {
       const body = await readBody(req);
       rememberCmid(body.cmid);
-      const account = getAccount(body.accountId);
+      const account = await resolveBridgeAccount(body);
       account.updateTokens(body.tokens);
       if (body.lastHunt) account.setHunt(body.lastHunt);
       if (account.state.status === 'replaced') account.handOff();
@@ -779,30 +807,30 @@ function createApp({ store, api, species, itemsCatalog }) {
       if (body.telemetry && typeof account.applyTelemetry === 'function') {
         account.applyTelemetry(body.telemetry);
       }
-      return sendJson(res, 200, { ok: true, status: account.state.status });
+      return sendJson(res, 200, { ok: true, accountId: account.id, status: account.state.status });
     }
     if (req.method === 'POST' && p === '/api/bridge/telemetry') {
       const body = await readBody(req);
       rememberCmid(body.cmid);
-      const account = getAccount(body.accountId);
+      const account = await resolveBridgeAccount(body);
       if (body.tokens) account.updateTokens(body.tokens);
       if (account.state.status === 'replaced') account.handOff();
       if (account.state.status === 'handedOff') heartbeats.set(account.id, Date.now());
       if (typeof account.applyTelemetry === 'function') {
         account.applyTelemetry(body.telemetry);
       }
-      return sendJson(res, 200, { ok: true, status: account.state.status });
+      return sendJson(res, 200, { ok: true, accountId: account.id, status: account.state.status });
     }
     if (req.method === 'POST' && p === '/api/bridge/release') {
       const body = await readBody(req);
-      const account = getAccount(body.accountId);
+      const account = await resolveBridgeAccount(body);
       heartbeats.set(account.id, 0);
       if (body.lastHunt) account.setHunt(body.lastHunt);
       if (account.state.status === 'handedOff') {
         account.resume();
         pushLog({ at: Date.now(), account: account.id, accountName: account.name, text: 'Aba do jogo fechada; Cockpit reassumiu.' });
       }
-      return sendJson(res, 200, { ok: true });
+      return sendJson(res, 200, { ok: true, accountId: account.id });
     }
     throw httpError(404, 'Rota da ponte não encontrada.');
   }

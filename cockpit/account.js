@@ -403,8 +403,7 @@ class Account extends EventEmitter {
         }
         const isShinyKill = Boolean(
           message.shiny || message.isShiny || message.rarity === 'shiny' ||
-          (message.speciesName && /shiny|✨/i.test(message.speciesName)) ||
-          [...this.activeShinies].some(k => k.endsWith(`:${message.speciesId}`))
+          (message.speciesName && /shiny|✨/i.test(message.speciesName))
         );
         if (isShinyKill) {
           for (const key of this.activeShinies) {
@@ -504,6 +503,40 @@ class Account extends EventEmitter {
       if (this.state.status !== 'online' || !this.pokes) this.applyPokes(t.pokes);
     } else if (t.pokeDelta) {
       this.applyDelta(t.pokeDelta);
+    }
+    if (Array.isArray(t.captures)) {
+      if (!this.pokes) this.pokes = [];
+      for (const c of t.captures) {
+        if (c && c.id) this.applyDelta(c);
+      }
+    }
+    if (Array.isArray(t.kills)) {
+      for (const k of t.kills) {
+        if (!k || typeof k !== 'object') continue;
+        this.setState({ lastKillAt: Number(k.at) || Date.now(), leaderFainted: false });
+        this.emit('kill', k);
+        if (Array.isArray(k.loot) && k.loot.length > 0 && this.inventory) {
+          for (const l of k.loot) {
+            if (!l.itemId) continue;
+            const existing = this.inventory.find(it => it.itemId === l.itemId);
+            if (existing) existing.quantity = (existing.quantity || 0) + (l.qty || 1);
+            else this.inventory.push({ itemId: l.itemId, quantity: l.qty || 1 });
+          }
+          this.emit('inventory', this.inventory);
+        }
+        if (k.shiny || k.isShiny) {
+          this.emit('shiny-encounter', {
+            type: 'kill',
+            at: k.at || Date.now(),
+            speciesId: k.speciesId,
+            speciesName: k.speciesName || k.name,
+            loot: k.loot
+          });
+        }
+      }
+    }
+    if (typeof t.leaderFainted === 'boolean') {
+      this.setState({ leaderFainted: t.leaderFainted });
     }
     if (t.balls) {
       this.balls = {
