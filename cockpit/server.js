@@ -38,6 +38,8 @@ const STATIC = {
   '/': ['public/index.html', 'text/html; charset=utf-8'],
   '/app.js': ['public/app.js', 'text/javascript; charset=utf-8'],
   '/style.css': ['public/style.css', 'text/css; charset=utf-8'],
+  '/favicon.svg': ['public/favicon.svg', 'image/svg+xml'],
+  '/favicon.ico': ['public/favicon.svg', 'image/svg+xml'],
   '/shared/classifier.js': ['../shared/classifier.js', 'text/javascript; charset=utf-8'],
   '/shared/species.js': ['../shared/species.js', 'text/javascript; charset=utf-8']
 };
@@ -742,6 +744,16 @@ function createApp({ store, api, species, itemsCatalog }) {
   }
 
   async function bridge(req, res, p) {
+    if (req.method === 'GET' && p === '/api/bridge/accounts') {
+      const list = [...accounts.values()].map(a => ({
+        id: a.id,
+        name: a.name,
+        tokens: a.tokens,
+        lastHunt: a.lastHunt,
+        status: a.state.status
+      }));
+      return sendJson(res, 200, { accounts: list });
+    }
     if (req.method === 'POST' && p === '/api/bridge/register') {
       const body = await readBody(req);
       rememberCmid(body.cmid);
@@ -838,9 +850,12 @@ function createApp({ store, api, species, itemsCatalog }) {
       return bridge(req, res, p);
     }
 
+    const isBridgeClient = req.headers['x-piw-bridge'] === '1';
     const origin = req.headers.origin;
-    if (origin && !isAllowedOrigin(origin)) throw httpError(403, 'Origem não permitida.');
-    if (req.method !== 'GET' && req.method !== 'HEAD' && !origin) throw httpError(403, 'Origem ausente.');
+    if (!isBridgeClient) {
+      if (origin && !isAllowedOrigin(origin)) throw httpError(403, 'Origem não permitida.');
+      if (req.method !== 'GET' && req.method !== 'HEAD' && !origin) throw httpError(403, 'Origem ausente.');
+    }
 
     if (p === '/events') {
       res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
@@ -1043,10 +1058,13 @@ function createApp({ store, api, species, itemsCatalog }) {
         for (const al of sum.alerts) discord.sendAlert(account.name, account.id, al.key, al.text, al.level);
       }
     }
-  }, 15000);
+  }, 15000).unref();
 
   return {
     server,
+    accounts,
+    getRouteRunner,
+    addAccount,
     startAll() {
       for (const record of store.list()) addAccount(record).start();
     }
