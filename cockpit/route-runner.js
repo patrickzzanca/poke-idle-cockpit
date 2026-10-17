@@ -19,6 +19,7 @@ class RouteRunner {
     this.state = {
       running: false,
       paused: false,
+      suspendedByHandoff: false,
       startedAt: null,
       originalHunt: null,
       originalHuntName: null,
@@ -40,6 +41,7 @@ class RouteRunner {
     this.onKillBound = this.handleKill.bind(this);
     this.onFieldNoneBound = this.handleFieldNone.bind(this);
     this.onGameErrorBound = this.handleGameError.bind(this);
+    this.onAccountStateBound = this.handleAccountState.bind(this);
   }
 
   getStatus() {
@@ -74,6 +76,7 @@ class RouteRunner {
 
     this.state.running = true;
     this.state.paused = false;
+    this.state.suspendedByHandoff = this.account.state?.status === 'handedOff';
     this.state.startedAt = Date.now();
     this.state.originalHunt = origSlug;
     this.state.originalHuntName = origName;
@@ -105,10 +108,13 @@ class RouteRunner {
     this.account.on('kill', this.onKillBound);
     this.account.on('field-none', this.onFieldNoneBound);
     this.account.on('game-error', this.onGameErrorBound);
+    this.account.on('state', this.onAccountStateBound);
 
     this.log(`🚀 Rota Automática iniciada com ${this.state.queue.length} Pokémon! Hunt de retorno: ${origName}.`);
 
-    this.enterCurrentHunt();
+    if (!this.state.suspendedByHandoff) {
+      this.enterCurrentHunt();
+    }
     this.startWatchdog();
     this.emitStatus();
   }
@@ -144,10 +150,12 @@ class RouteRunner {
     if (!this.state.running) return;
     this.state.running = false;
     this.state.paused = false;
+    this.state.suspendedByHandoff = false;
     this.account.off('capture', this.onCaptureBound);
     this.account.off('kill', this.onKillBound);
     this.account.off('field-none', this.onFieldNoneBound);
     this.account.off('game-error', this.onGameErrorBound);
+    this.account.off('state', this.onAccountStateBound);
     clearInterval(this.timer);
 
     if (returnHome && this.state.returnHome && this.state.originalHunt) {
@@ -277,10 +285,12 @@ class RouteRunner {
   finishRoute() {
     this.state.running = false;
     this.state.paused = false;
+    this.state.suspendedByHandoff = false;
     this.account.off('capture', this.onCaptureBound);
     this.account.off('kill', this.onKillBound);
     this.account.off('field-none', this.onFieldNoneBound);
     this.account.off('game-error', this.onGameErrorBound);
+    this.account.off('state', this.onAccountStateBound);
     clearInterval(this.timer);
 
     const totalMin = Math.max(1, Math.round((Date.now() - this.state.startedAt) / 60000));
@@ -296,37 +306,63 @@ class RouteRunner {
     this.emitStatus();
   }
 
-  startWatchdog() {
-    clearInterval(this.timer);
-    this.timer = setInterval(() => {
-      if (!this.state.running || this.state.paused) return;
-      const target = this.getCurrentTarget();
-      if (!target) return;
-
-      const now = Date.now();
-
-      // Watchdog 1: Se não houver kill em X segundos (padrão: 60s / 1 min)
-      if (this.state.maxTimeWithoutKillSec > 0) {
-        const timeWithoutKill = Math.round((now - (this.state.lastKillInHuntAt || this.state.currentHuntStartedAt || now)) / 1000);
-        if (timeWithoutKill >= this.state.maxTimeWithoutKillSec) {
-          const tempoDesc = this.state.maxTimeWithoutKillSec >= 60
-            ? `${Math.round(this.state.maxTimeWithoutKillSec / 60)} min`
-            : `${this.state.maxTimeWithoutKillSec}s`;
-          this.log(`⚠️ Nenhuma kill em ${tempoDesc} na hunt de ${target.name}. Pulando para o próximo alvo…`);
-          target.status = 'skipped';
-          this.advanceNext();
-          return;
+  handleAccountState(snapshot) {
+    if (!this.state.running || !snapshot) return;
+    if (snapshot.status === 'handedOff' && !this.state.suspendedByHandoff) {
+      this.state.suspendedByHandoff = true;
+      this.log('⏸️ Rota suspensa temporariamente (sessão visual ativa no Piwdex Hub / navegador).');
+      this.emitStatus();
+    } else if (snapshot.status === 'online' && this.state.suspendedByHandoff) {
+      this.state.suspendedByHandoff = false;
+      this.state.currentHuntStartedAt = Date.now();
+      this.state.lastKillInHuntAt = Date.now();
+      if (!this.state.paused) {
+        const target = this.getCurrentTarget();
+        if (target) {
+          this.log(`▶️ Sessão visual encerrada; retomando Rota Automática em ${target.name} [hunt: ${target.slug}]…`);
+          this.account.setHunt(target.slug, target.name);
+          this.account.send({ type: 'enter-hunt', slug: target.slug });
         }
       }
+      this.emitStatus();
+    }
+  }
 
-      // Watchdog 2: Tempo máximo total por hunt (ex: 3, 5 ou 10 min)
-      const elapsedSec = Math.round((now - (this.state.currentHuntStartedAt || now)) / 1000);
-      if (elapsedSec > this.state.maxTimePerHuntSec) {
-        this.log(`⚠️ Tempo limite de ${Math.round(this.state.maxTimePerHuntSec / 60)} min atingido em ${target.name}. Avançando para o próximo alvo…`);
+  checkWatchdog() {
+    if (!this.state.running || this.state.paused || this.state.suspendedByHandoff) return;
+    if (this.account.state?.status === 'handedOff') return;
+    const target = this.getCurrentTarget();
+    if (!target) return;
+
+    const now = Date.now();
+
+    // Watchdog 1: Se não houver kill em X segundos (padrão: 60s / 1 min)
+    if (this.state.maxTimeWithoutKillSec > 0) {
+      const timeWithoutKill = Math.round((now - (this.state.lastKillInHuntAt || this.state.currentHuntStartedAt || now)) / 1000);
+      if (timeWithoutKill >= this.state.maxTimeWithoutKillSec) {
+        const tempoDesc = this.state.maxTimeWithoutKillSec >= 60
+          ? `${Math.round(this.state.maxTimeWithoutKillSec / 60)} min`
+          : `${this.state.maxTimeWithoutKillSec}s`;
+        this.log(`⚠️ Nenhuma kill em ${tempoDesc} na hunt de ${target.name}. Pulando para o próximo alvo…`);
         target.status = 'skipped';
         this.advanceNext();
+        return;
       }
-    }, 2000);
+    }
+
+    // Watchdog 2: Tempo máximo total por hunt (ex: 3, 5 ou 10 min)
+    const elapsedSec = Math.round((now - (this.state.currentHuntStartedAt || now)) / 1000);
+    if (elapsedSec > this.state.maxTimePerHuntSec) {
+      this.log(`⚠️ Tempo limite de ${Math.round(this.state.maxTimePerHuntSec / 60)} min atingido em ${target.name}. Avançando para o próximo alvo…`);
+      target.status = 'skipped';
+      this.advanceNext();
+    }
+  }
+
+  startWatchdog() {
+    clearInterval(this.timer);
+    this.timer = setInterval(() => this.checkWatchdog(), 2000);
+    if (typeof this.timer.unref === 'function') this.timer.unref();
   }
 
   log(text) {
