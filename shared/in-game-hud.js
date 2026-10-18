@@ -350,12 +350,15 @@ function createInGameHud({
 
   function enhanceTooltip(tipEl) {
     if (!tipEl || tipEl.dataset?.piwEnhanced) return;
+    if (tipEl.classList?.contains('piw-tip-badge') || tipEl.classList?.contains('piw-tip-pill')) return;
+    if (tipEl.closest?.('.piw-tip-badge, .piw-tags, #piw-hud')) return;
+    if (tipEl.querySelector?.('.piw-tip-badge')) return;
     const text = tipEl.textContent || '';
     if (!text.includes('HP') && !text.includes('IV') && !text.includes('Quality') && !text.includes('Qualidade')) return;
 
     const iv = readIv(text);
     const q = readQuality(text);
-    const nameEl = tipEl.querySelector?.('.inv-tip-name, [class*="tip-name"]') || tipEl.firstElementChild;
+    const nameEl = tipEl.querySelector?.('.inv-tip-name') || tipEl.firstElementChild;
     const pokeName = cleanName(nameEl?.textContent || '');
 
     if (iv == null && q == null && !pokeName) return;
@@ -374,6 +377,7 @@ function createInGameHud({
 
     const badge = doc.createElement('div');
     badge.className = 'piw-tip-badge';
+    if (badge.dataset) badge.dataset.piwEnhanced = 'true';
 
     const ivPercent = iv != null ? `${((iv / 192) * 100).toFixed(1)}%` : null;
     const ivHtml = iv != null ? `<span class="piw-tip-pill iv">⭐ IV ${iv}/192 <small>(${ivPercent})</small></span>` : '';
@@ -591,10 +595,11 @@ function createInGameHud({
         for (const r of records) {
           for (const n of r.addedNodes || []) {
             if (n.nodeType === 1) {
-              if (n.matches?.('.inv-tip, .poke-tip, [class*="-tip"], [class*="tip-"]')) {
+              if (n.classList?.contains('piw-tip-badge') || n.classList?.contains('piw-tip-pill')) continue;
+              if (n.matches?.('.inv-tip, .poke-tip')) {
                 enhanceTooltip(n);
               }
-              const tips = n.querySelectorAll?.('.inv-tip, .poke-tip, [class*="-tip"], [class*="tip-"]');
+              const tips = n.querySelectorAll?.('.inv-tip, .poke-tip');
               if (tips) tips.forEach(enhanceTooltip);
             }
           }

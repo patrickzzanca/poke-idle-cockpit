@@ -819,7 +819,13 @@
         iv: null, q: null, nameEl: card, compact: true };
     } else return null;
     if (!nameEl) return null;
-    const nameText = nameEl.childNodes[0]?.textContent?.trim() || nameEl.getAttribute('title') || '';
+    let nameText = '';
+    for (let i = 0; i < nameEl.childNodes.length; i++) {
+      const cn = nameEl.childNodes[i];
+      if (cn.nodeType === 3) nameText += cn.textContent;
+      else if (cn.nodeType === 1 && !cn.classList?.contains('piw-tags')) nameText += cn.textContent;
+    }
+    nameText = nameText.trim() || nameEl.getAttribute('title') || '';
     const meta = metaEl?.textContent || '';
     return {
       kind, name: cleanName(nameText), level: readLevel(`${nameText} ${meta}`), iv: readIv(meta), q: readQuality(meta),
@@ -894,14 +900,17 @@
   // ---------------- Leitor de Tooltips de Pokémon ----------------
 
   function enhanceTooltip(tipEl) {
-    if (!tipEl || tipEl.dataset.piwEnhanced) return;
+    if (!tipEl || tipEl.dataset?.piwEnhanced) return;
+    if (tipEl.classList?.contains('piw-tip-badge') || tipEl.classList?.contains('piw-tip-pill')) return;
+    if (tipEl.closest?.('.piw-tip-badge, .piw-tags, #piw-hud')) return;
+    if (tipEl.querySelector?.('.piw-tip-badge')) return;
     const text = tipEl.textContent || '';
     if (!text.includes('HP') && !text.includes('IV') && !text.includes('Quality') && !text.includes('Qualidade')) return;
 
     const hoveredCard = document.querySelector('.mks-row:hover, .dpt-poke-row:hover, .mkt2-card:hover, .mkt2-trow:hover');
     const iv = readIv(text) ?? (hoveredCard ? readIv(hoveredCard.textContent || '') : null);
     const q = readQuality(text);
-    const nameEl = tipEl.querySelector('.inv-tip-name, [class*="tip-name"]') || tipEl.firstElementChild;
+    const nameEl = tipEl.querySelector('.inv-tip-name') || tipEl.firstElementChild;
     const pokeName = cleanName(nameEl?.textContent || '');
 
     if (iv == null && q == null && !pokeName) return;
@@ -923,6 +932,7 @@
 
     const badge = document.createElement('div');
     badge.className = 'piw-tip-badge';
+    badge.dataset.piwEnhanced = 'true';
 
     const ivPercent = iv != null ? `${((iv / 192) * 100).toFixed(1)}%` : null;
     const ivHtml = iv != null ? `<span class="piw-tip-pill iv">⭐ IV ${iv}/192 <small>(${ivPercent})</small></span>` : '';
@@ -1416,7 +1426,7 @@
     renderHud();
     renderBridgeButton();
 
-    const TIP_SELECTOR = '.inv-tip, .poke-tip, [class*="-tip"], [class*="tip-"]';
+    const TIP_SELECTOR = '.inv-tip, .poke-tip';
     new MutationObserver(records => {
       if (!hudEl?.isConnected) renderHud();
       if (!document.getElementById('piw-bridge')) renderBridgeButton();
@@ -1424,12 +1434,13 @@
       for (let i = 0; i < records.length; i++) {
         const r = records[i];
         const target = r.target.nodeType === 1 ? r.target : r.target.parentElement;
-        if (!target || target.closest?.('.piw-tags') || target.closest?.('#piw-hud')) continue;
+        if (!target || target.closest?.('.piw-tags, #piw-hud, .piw-tip-badge')) continue;
         if (!shouldScan && target.matches?.(CARD_SELECTOR)) shouldScan = true;
         const added = r.addedNodes;
         for (let j = 0; j < added.length; j++) {
           const n = added[j];
           if (n.nodeType !== 1) continue;
+          if (n.id === 'piw-hud' || n.classList?.contains('piw-tags') || n.classList?.contains('piw-tip-badge') || n.classList?.contains('piw-tip-pill')) continue;
           if (n.matches?.(TIP_SELECTOR)) enhanceTooltip(n);
           if (!shouldScan && (n.matches?.(CARD_SELECTOR) || n.querySelector?.(CARD_SELECTOR))) {
             shouldScan = true;
