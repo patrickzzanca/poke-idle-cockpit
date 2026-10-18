@@ -269,9 +269,15 @@ function createApp({ store, api, species, itemsCatalog }) {
     const me = await api.me(current.accessToken);
     const character = me?.character ?? {};
     const name = String(character.name ?? 'Conta');
-    const id = String(character.id ?? name).toLowerCase();
-    store.upsert({ id, name, tokens: current, lastHunt: store.get(id)?.lastHunt ?? null });
+    let id = String(character.id ?? name).toLowerCase();
+    for (const acc of accounts.values()) {
+      if (acc.id === id || String(acc.name || '').toLowerCase() === name.toLowerCase()) {
+        id = acc.id;
+        break;
+      }
+    }
     const existing = accounts.get(id);
+    store.upsert({ id, name, tokens: current, lastHunt: store.get(id)?.lastHunt ?? null });
     if (fromTab) {
       // A aba que enviou está jogando; o cockpit assume quando ela fechar.
       const account = existing ?? addAccount(store.get(id));
@@ -281,7 +287,9 @@ function createApp({ store, api, species, itemsCatalog }) {
     } else {
       addAccount(store.get(id)).start();
     }
-    pushLog({ at: Date.now(), account: id, accountName: name, text: 'Conta cadastrada no cockpit.' });
+    if (!existing) {
+      pushLog({ at: Date.now(), account: id, accountName: name, text: 'Conta cadastrada no cockpit.' });
+    }
     return { id, name };
   }
 
@@ -743,6 +751,17 @@ function createApp({ store, api, species, itemsCatalog }) {
     if (store.setCmid(cmid)) pushLog({ at: Date.now(), text: 'Impressão desta máquina (cmid) registrada; vale a partir da próxima conexão.' });
   }
 
+  function extractJwtSub(tokens) {
+    const raw = tokens?.refreshToken || tokens?.accessToken;
+    if (!raw || typeof raw !== 'string') return null;
+    try {
+      const payload = JSON.parse(Buffer.from(raw.split('.')[1], 'base64url').toString('utf8'));
+      return payload?.sub || payload?.email || null;
+    } catch {
+      return null;
+    }
+  }
+
   async function resolveBridgeAccount(body) {
     if (body?.accountId) {
       const acc = accounts.get(body.accountId) || accounts.get(String(body.accountId).toLowerCase());
@@ -755,10 +774,12 @@ function createApp({ store, api, species, itemsCatalog }) {
       }
     }
     if (body?.tokens) {
+      const targetSub = extractJwtSub(body.tokens);
       for (const acc of accounts.values()) {
         if (
           (body.tokens.refreshToken && acc.tokens?.refreshToken === body.tokens.refreshToken) ||
-          (body.tokens.accessToken && acc.tokens?.accessToken === body.tokens.accessToken)
+          (body.tokens.accessToken && acc.tokens?.accessToken === body.tokens.accessToken) ||
+          (targetSub && extractJwtSub(acc.tokens) === targetSub)
         ) {
           return acc;
         }
@@ -814,8 +835,8 @@ function createApp({ store, api, species, itemsCatalog }) {
       rememberCmid(body.cmid);
       const account = await resolveBridgeAccount(body);
       if (body.tokens) account.updateTokens(body.tokens);
-      if (account.state.status === 'replaced') account.handOff();
-      if (account.state.status === 'handedOff') heartbeats.set(account.id, Date.now());
+      if (account.state.status !== 'handedOff') account.handOff();
+      heartbeats.set(account.id, Date.now());
       if (typeof account.applyTelemetry === 'function') {
         account.applyTelemetry(body.telemetry);
       }
@@ -824,12 +845,16 @@ function createApp({ store, api, species, itemsCatalog }) {
     if (req.method === 'POST' && p === '/api/bridge/release') {
       const body = await readBody(req);
       const account = await resolveBridgeAccount(body);
-      heartbeats.set(account.id, 0);
       if (body.lastHunt) account.setHunt(body.lastHunt);
-      if (account.state.status === 'handedOff') {
-        account.resume();
-        pushLog({ at: Date.now(), account: account.id, accountName: account.name, text: 'Aba do jogo fechada; Cockpit reassumiu.' });
-      }
+      const releaseAt = Date.now();
+      heartbeats.set(account.id, releaseAt);
+      setTimeout(() => {
+        if (account.state.status === 'handedOff' && (heartbeats.get(account.id) ?? 0) <= releaseAt) {
+          heartbeats.set(account.id, 0);
+          account.resume();
+          pushLog({ at: Date.now(), account: account.id, accountName: account.name, text: 'Aba do jogo fechada; Cockpit reassumiu.' });
+        }
+      }, 8000).unref?.();
       return sendJson(res, 200, { ok: true, accountId: account.id });
     }
     throw httpError(404, 'Rota da ponte não encontrada.');

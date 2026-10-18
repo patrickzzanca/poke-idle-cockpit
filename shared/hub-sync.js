@@ -232,7 +232,7 @@ function bootstrapElectronHub({
     await hubSync.syncFromCockpit().catch(() => {});
     const timer = setInterval(() => {
       hubSync.heartbeatAll().catch(() => {});
-    }, 30_000);
+    }, 15_000);
     if (typeof timer.unref === 'function') timer.unref();
   };
 

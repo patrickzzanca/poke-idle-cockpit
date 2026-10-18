@@ -468,7 +468,7 @@ class Account extends EventEmitter {
   applyTelemetry(t) {
     if (!t || typeof t !== 'object') return;
     if (this.state.status !== 'handedOff') {
-      this.setState({ status: 'handedOff', error: null });
+      this.handOff();
     }
     if (t.lastHunt) {
       this.setHunt(t.lastHunt, t.huntName);

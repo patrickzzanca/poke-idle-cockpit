@@ -407,7 +407,10 @@
 
   let telemetryTimer = null;
   function sendTelemetry() {
-    const accountId = store.getItem(ACCOUNT_KEY) || undefined;
+    let accountId = store.getItem(ACCOUNT_KEY) || undefined;
+    if (!accountId) {
+      try { accountId = page.localStorage.getItem(ACCOUNT_KEY) || window.localStorage.getItem(ACCOUNT_KEY) || undefined; } catch {}
+    }
     const tokens = readTokens();
     if (!tokens) return;
 
@@ -431,13 +434,17 @@
     cockpit('POST', '/api/bridge/telemetry', payload).then(res => {
       if (res?.accountId) {
         try { store.setItem(ACCOUNT_KEY, res.accountId); } catch {}
+        try { page.localStorage.setItem(ACCOUNT_KEY, res.accountId); } catch {}
+        try { window.localStorage.setItem(ACCOUNT_KEY, res.accountId); } catch {}
       }
       cockpitConnected = true;
       cockpitRunningHeadless = res?.status === 'online';
       updateHudStatus();
     }).catch(error => {
       if (error.status === 404) {
-        store.removeItem(ACCOUNT_KEY);
+        try { store.removeItem(ACCOUNT_KEY); } catch {}
+        try { page.localStorage.removeItem(ACCOUNT_KEY); } catch {}
+        try { window.localStorage.removeItem(ACCOUNT_KEY); } catch {}
       }
       cockpitConnected = false;
       updateHudStatus();
@@ -471,6 +478,7 @@
   });
 
   page.addEventListener('pagehide', () => {
+    if (typeof window !== 'undefined' && window.__piwCockpitBridge) return;
     const accountId = store.getItem(ACCOUNT_KEY);
     if (accountId && location.pathname.startsWith('/play')) {
       try {
