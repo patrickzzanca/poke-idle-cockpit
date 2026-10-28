@@ -46,7 +46,9 @@
       isDitto: Boolean(raw.isDitto),
       team: Boolean(raw.team),
       starter: Boolean(raw.starter),
-      locked: Boolean(raw.locked)
+      locked: Boolean(raw.locked),
+      breedingBox: Boolean(raw.breedingBox),
+      stats: raw.stats && typeof raw.stats === 'object' ? raw.stats : null
     };
   }
 

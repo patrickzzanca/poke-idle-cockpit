@@ -145,13 +145,17 @@ body {
   background: transparent;
   border: none;
   color: var(--text-muted);
-  padding: 6px 14px;
+  padding: 6px 12px;
   border-radius: 8px;
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.15s ease;
   font-family: inherit;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
 }
 
 .nav-pill:hover {
@@ -2341,42 +2345,169 @@ body.light-mode .bag-item-icon-wrap {
 
 .bag-my-listings-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 10px;
-  margin-top: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  gap: 12px;
+  margin-top: 12px;
 }
 
 .my-listing-card {
   display: flex;
-  align-items: center;
+  flex-direction: column;
   justify-content: space-between;
-  gap: 10px;
-  padding: 10px 12px;
+  gap: 12px;
+  padding: 12px 14px;
   background: var(--lcd-screen);
   border: 1px solid var(--border-subtle);
-  border-radius: 10px;
+  border-radius: 12px;
+  transition: border-color 0.15s ease, transform 0.15s ease;
+}
+
+.my-listing-card:hover {
+  transform: translateY(-1px);
 }
 
 .my-listing-left {
   display: flex;
-  align-items: center;
-  gap: 10px;
+  align-items: flex-start;
+  gap: 12px;
   min-width: 0;
+  width: 100%;
+}
+
+.my-listing-icon-wrap {
+  width: 42px;
+  height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface-subtle, rgba(255, 255, 255, 0.05));
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.1));
+  border-radius: 10px;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+.my-listing-icon-wrap img {
+  width: 30px;
+  height: 30px;
+  object-fit: contain;
+  image-rendering: pixelated;
 }
 
 .my-listing-info {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 5px;
   min-width: 0;
+  flex: 1;
+}
+
+.my-listing-name-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
 }
 
 .my-listing-name {
-  font-size: 13px;
+  font-size: 13.5px;
   font-weight: 700;
+  color: var(--text-main);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.my-listing-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.my-listing-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  width: 100%;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+body.light-mode .my-listing-actions {
+  border-top-color: rgba(0, 0, 0, 0.06);
+}
+
+.badge-stale {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  background: rgba(231, 76, 60, 0.15);
+  border: 1px solid rgba(231, 76, 60, 0.4);
+  color: #f87171;
+  border-radius: 6px;
+  font-size: 10.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.badge-undercut {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  background: rgba(243, 156, 18, 0.15);
+  border: 1px solid rgba(243, 156, 18, 0.4);
+  color: #fbbf24;
+  border-radius: 6px;
+  font-size: 10.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.badge-best-price {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  background: rgba(46, 204, 113, 0.15);
+  border: 1px solid rgba(46, 204, 113, 0.4);
+  color: #4ade80;
+  border-radius: 6px;
+  font-size: 10.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.badge-age {
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.btn-repost {
+  background: rgba(56, 189, 248, 0.14);
+  border: 1px solid rgba(56, 189, 248, 0.45);
+  color: #38bdf8;
+  border-radius: 8px;
+  padding: 4px 10px;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.btn-repost:hover {
+  background: rgba(56, 189, 248, 0.26);
+  border-color: #38bdf8;
+}
+
+.my-listing-card.is-undercut {
+  border-color: rgba(243, 156, 18, 0.3);
+}
+
+.my-listing-card.is-stale {
+  border-color: rgba(231, 76, 60, 0.3);
 }
 
 /* Modal de Precificação */
@@ -3096,7 +3227,21 @@ body.light-mode .bag-item-icon-wrap {
   cursor: help;
 }
 
+.breeder-incubator-card {
+  padding: 16px 18px;
+  border-color: rgba(56, 189, 248, 0.35);
+  background: linear-gradient(180deg, rgba(56, 189, 248, 0.04) 0%, var(--surface-card) 100%);
+}
+
+.breeder-eggs-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
 .breeder-simulator-card {
+  padding: 16px 18px;
   border-color: rgba(168, 85, 247, 0.4);
   background: linear-gradient(180deg, rgba(168, 85, 247, 0.05) 0%, var(--surface-card) 100%);
 }
@@ -3365,6 +3510,25 @@ body.light-mode .bag-item-icon-wrap {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.scenarios-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+}
+
+#breeder-scenarios-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+#breeder-scenarios-table th,
+#breeder-scenarios-table td {
+  padding: 6px 6px;
+  font-size: 11px;
+  white-space: nowrap;
 }
 
 .res-card-title {

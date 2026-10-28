@@ -500,7 +500,11 @@ class Account extends EventEmitter {
     }
     // Com o cockpit online, a lista do próprio WS é a fonte da verdade; a de uma aba pode estar parcial/velha.
     if (Array.isArray(t.pokes)) {
-      if (this.state.status !== 'online' || !this.pokes) this.applyPokes(t.pokes);
+      if (this.state.status !== 'online' || !this.pokes) {
+        if (!this.pokes || this.pokes.length < 20 || t.pokes.length >= 20) {
+          this.applyPokes(t.pokes);
+        }
+      }
     } else if (t.pokeDelta) {
       this.applyDelta(t.pokeDelta);
     }
@@ -574,12 +578,7 @@ class Account extends EventEmitter {
   }
 
   applyPokes(list) {
-    const previous = this.pokes;
     this.pokes = list;
-    if (previous) {
-      const known = new Set(previous.map(p => p?.id));
-      for (const poke of list) if (poke && !known.has(poke.id)) this.emit('capture', { at: Date.now(), poke });
-    }
     this.updateLeader();
     this.emit('pokes', this.pokes);
   }

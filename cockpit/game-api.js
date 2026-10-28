@@ -53,6 +53,17 @@ function createGameApi({ fetchImpl = globalThis.fetch, origin = ORIGIN } = {}) {
     },
     marketCategory: (token, category, signal) => request(`/api/game/market?category=${encodeURIComponent(category)}`, { token, signal }),
     marketAction: (token, body) => request('/api/game/market/action', { method: 'POST', token, body }),
+    breedingCenter: (token, signal) => request('/api/game/breeding?action=center', { token, signal }),
+    breedingQuote: (token, { parent1, parent2, free = 1 } = {}, signal) => {
+      const q = new URLSearchParams({
+        action: 'quote',
+        parent1: String(parent1),
+        parent2: String(parent2),
+        free: free ? '1' : '0'
+      });
+      return request(`/api/game/breeding?${q.toString()}`, { token, signal });
+    },
+    breedingAction: (token, body) => request('/api/game/breeding', { method: 'POST', token, body }),
     creatures: () => request('/game/creatures.json'),
     items: () => request('/game/items.json')
   };

@@ -147,6 +147,7 @@ function createInGameHud({
   let currentHuntName = null;
   let latestAnalyzer = null;
   let ownedRaw = [];
+  let pokeChunks = null;
   let owned = [];
   let sessionShinies = [];
   let pendingKills = [];
@@ -561,10 +562,27 @@ function createInGameHud({
     }
 
     if (message.type === 'pokes' && Array.isArray(message.list)) {
-      ownedRaw = message.list;
-      pokesDirty = true;
-      rebuildCollection();
-      queueTelemetry();
+      if (!ownedRaw || ownedRaw.length < 20 || message.list.length >= 20) {
+        ownedRaw = message.list;
+        pokesDirty = true;
+        rebuildCollection();
+        queueTelemetry();
+      }
+      return;
+    }
+
+    if (message.type === 'pokes-chunk') {
+      if (!pokeChunks || pokeChunks.gen !== message.gen) pokeChunks = { gen: message.gen, parts: new Map() };
+      pokeChunks.parts.set(message.seq, Array.isArray(message.list) ? message.list : []);
+      if (pokeChunks.parts.size >= message.total) {
+        const list = [];
+        for (let i = 0; i < message.total; i++) list.push(...(pokeChunks.parts.get(i) || []));
+        pokeChunks = null;
+        ownedRaw = list;
+        pokesDirty = true;
+        rebuildCollection();
+        queueTelemetry();
+      }
       return;
     }
 

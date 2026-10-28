@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PIW Cockpit — Ponte, HUD & Tags
 // @namespace    pk-ext
-// @version      2.2.4
+// @version      2.2.5
 // @description  Liga as abas do Poke Idle World ao cockpit local, exibe HUD de hunt retrátil com radar de shiny, tags unificadas e leitor de IVs.
 // @match        https://poke.idleworld.online/*
 // @match        https://*.idleworld.online/*
@@ -229,7 +229,7 @@
     try { localStorage.setItem('piw:cockpit_url', savedUrl); } catch {}
   }
   let COCKPIT = savedUrl;
-  console.log('[PIW Cockpit] 2.2.3 iniciado em', location.href.split('#')[0]);
+  console.log('[PIW Cockpit] 2.2.5 iniciado em', location.href.split('#')[0]);
   const page = (typeof unsafeWindow !== 'undefined' && unsafeWindow) ? unsafeWindow : window;
   const store = (page && page.sessionStorage) ? page.sessionStorage : window.sessionStorage;
   const TOKENS_KEY = 'pokeweb:tokens';
@@ -493,10 +493,11 @@
 
   // ---------------- Tags nos cards & Coleção ----------------
 
-  const CARD_SELECTOR = '.dpt-poke-row, .mkt2-card, .mkt2-trow, .mks-row, .inv-grid .inv-slot.inv-poke';
+  const CARD_SELECTOR = '.dpt-poke-row, .mkt2-card, .mkt2-trow, .mks-row, .brd-box-poke, .inv-grid .inv-slot.inv-poke';
   const fingerprints = new WeakMap();
   let species = null;
   let ownedRaw = [];
+  let pokeChunks = null;
   let owned = [];
   let ownedBySpeciesId = new Map();
   let ownedByName = new Map();
@@ -541,7 +542,7 @@
   // ---------------- Interceptador de WebSocket ----------------
 
   const NON_COMBAT_TYPES = new Set([
-    'pokes', 'poke-delta', 'inventory', 'balls', 'analyzer',
+    'pokes', 'pokes-chunk', 'poke-delta', 'inventory', 'balls', 'analyzer',
     'field', 'field-init', 'hunt-state', 'hunt-resume', 'field-kill', 'hunt-kill'
   ]);
 
@@ -702,10 +703,25 @@
 
       // 5. Coleção / Capturas
       if (message.type === 'pokes' && Array.isArray(message.list)) {
-        ownedRaw = message.list;
-        pokesChanged = true;
-        rebuild();
-        queueTelemetry();
+        if (!ownedRaw || ownedRaw.length < 20 || message.list.length >= 20) {
+          ownedRaw = message.list;
+          pokesChanged = true;
+          rebuild();
+          queueTelemetry();
+        }
+        return;
+      } else if (message.type === 'pokes-chunk') {
+        if (!pokeChunks || pokeChunks.gen !== message.gen) pokeChunks = { gen: message.gen, parts: new Map() };
+        pokeChunks.parts.set(message.seq, Array.isArray(message.list) ? message.list : []);
+        if (pokeChunks.parts.size >= message.total) {
+          const list = [];
+          for (let i = 0; i < message.total; i++) list.push(...(pokeChunks.parts.get(i) || []));
+          pokeChunks = null;
+          ownedRaw = list;
+          pokesChanged = true;
+          rebuild();
+          queueTelemetry();
+        }
         return;
       } else if (message.type === 'poke-delta' && message.poke?.id != null) {
         const i = ownedRaw.findIndex(p => p?.id === message.poke.id);
@@ -815,6 +831,8 @@
       kind = 'owned'; nameEl = card.querySelector('.dpt-name'); metaEl = card.querySelector('.dpt-meta');
     } else if (card.matches('.mks-row')) {
       kind = 'owned'; nameEl = card.querySelector('.mks-name'); metaEl = card.querySelector('.mks-meta');
+    } else if (card.matches('.brd-box-poke')) {
+      kind = 'owned'; nameEl = card.querySelector('.brd-box-name'); metaEl = card.querySelector('.brd-box-meta');
     } else if (card.matches('.mkt2-card, .mkt2-trow')) {
       const badge = card.querySelector('.mkt2-badge, .mkt2-card-badges');
       if (badge && !/pok[eé]mon/i.test(badge.textContent)) return null;

@@ -7,6 +7,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="alternate icon" href="/favicon.ico">
   <link rel="stylesheet" href="/style.css">
 </head>
 <body class="dark-mode">
@@ -22,11 +24,11 @@
       <button data-tab="contas" class="nav-pill active">Contas</button>
       <button data-tab="colecao" class="nav-pill">Coleção</button>
       <button data-tab="destaques" class="nav-pill">Destaques</button>
-      <!-- <button data-tab="mercado" class="nav-pill">Mercado</button> -->
+      <button data-tab="mercado" class="nav-pill">Mercado</button>
       <button data-tab="bag" class="nav-pill" id="tab-pill-bag">🎒 Bag & Venda</button>
       <button data-tab="rota" class="nav-pill" id="tab-pill-rota">🧭 Rota Automática <span id="route-badge" class="counter-badge hidden">Ativa</span></button>
       <button data-tab="breeder" class="nav-pill" id="tab-pill-breeder">🧬 Breeder</button>
-      <!-- <button data-tab="radar" class="nav-pill" id="tab-pill-radar">🎯 Radar <span id="radar-badge" class="counter-badge hidden">0</span></button> -->
+      <button data-tab="radar" class="nav-pill" id="tab-pill-radar">🎯 Radar <span id="radar-badge" class="counter-badge hidden">0</span></button>
     </nav>
     <div class="top-actions">
       <div class="status-indicator">
@@ -122,8 +124,7 @@
     </section>
 
     <!-- TAB 4: MERCADO -->
-    <!-- TAB 4: MERCADO (DESATIVADO) -->
-    <section id="tab-mercado" class="tab" hidden style="display:none">
+    <section id="tab-mercado" class="tab" hidden>
       <datalist id="species-datalist"></datalist>
 
       <!-- Banner de Cotações & Commodities -->
@@ -195,8 +196,8 @@
       <div id="mk-results" class="market-grid"></div>
     </section>
 
-    <!-- TAB 5: RADAR & WISHLIST (DESATIVADO) -->
-    <section id="tab-radar" class="tab" hidden style="display:none">
+    <!-- TAB 5: RADAR & WISHLIST -->
+    <section id="tab-radar" class="tab" hidden>
       <div class="radar-layout">
         <!-- Coluna Esquerda: Cadastro de Desejos (Wishlist) -->
         <div class="panel hardware-card radar-wishlist-panel">
@@ -462,6 +463,20 @@
         </div>
       </div>
 
+      <!-- INCUBADORA AO VIVO (OVOS & BREEDING CENTER DO JOGO) -->
+      <div class="hardware-card breeder-incubator-card" id="breeder-incubator-card" style="margin-top:1.2rem;">
+        <div class="panel-header-row">
+          <div class="panel-title-with-badge">
+            <h2>🥚 Incubadora ao Vivo (Creche do Jogo)</h2>
+            <span class="counter-badge" id="breeder-eggs-badge">Carregando...</span>
+          </div>
+          <div class="breeder-center-resources mono text-xs" id="breeder-center-resources"></div>
+        </div>
+        <div id="breeder-incubator-grid" class="breeder-eggs-grid">
+          <div class="empty">Consultando incubadora da conta...</div>
+        </div>
+      </div>
+
       <!-- BANCADA DO SIMULADOR DE BREEDING (SLOT 1 + SLOT 2) -->
       <div class="hardware-card breeder-simulator-card" style="margin-top:1.2rem;">
         <div class="panel-header-row">
@@ -563,7 +578,7 @@
               <div class="scenarios-table-wrap">
                 <table class="hardware-table small-table" id="breeder-scenarios-table">
                   <thead>
-                    <tr><th>Cenário</th><th>Probabilidade</th><th>Bônus Quality</th><th>Quality Final</th><th>Status</th></tr>
+                    <tr><th>Cenário</th><th>Chance</th><th>Bônus</th><th>Q Final</th><th>Status</th></tr>
                   </thead>
                   <tbody id="breeder-scenarios-tbody"></tbody>
                 </table>
@@ -572,9 +587,10 @@
 
             <!-- COSTS & EXTRAS -->
             <div class="res-card costs-card">
-              <div class="res-card-title">💰 Custos & Probabilidades</div>
+              <div class="res-card-title">💰 Custos & Execução ao Vivo</div>
               <div class="costs-list" id="breeder-costs-list"></div>
               <div class="shiny-chance-box" id="breeder-shiny-chance-box"></div>
+              <div id="breeder-live-actions" style="margin-top:0.75rem; display:flex; flex-direction:column; gap:0.5rem;"></div>
             </div>
           </div>
         </div>

@@ -574,12 +574,19 @@ function renderSessionShinies() {
       ),
       el('div', { class: 'shiny-log-time mono' },
         el('div', {}, time(item.at)),
-        el('div', { class: 'muted' }, `há ${ago(item.at)}`)
+        el('div', { class: 'muted shiny-time-ago', 'data-at': item.at }, `há ${ago(item.at)}`)
       )
     );
   });
 
   container.replaceChildren(...items);
+}
+
+function updateSessionShinyTimes() {
+  for (const node of document.querySelectorAll('.shiny-time-ago[data-at]')) {
+    const at = Number(node.dataset.at);
+    if (at) node.textContent = `há ${ago(at)}`;
+  }
 }
 
 function refreshAccountSelects() {
@@ -1609,7 +1616,12 @@ function renderBag() {
         el('img', {
           src: iconUrl,
           alt: item.name,
-          onerror: (e) => { e.target.style.display = 'none'; }
+          loading: 'lazy',
+          onerror: (e) => {
+            if (!e.target.src.endsWith('/favicon.svg')) {
+              e.target.src = '/favicon.svg';
+            }
+          }
         })
       ),
       el('div', { class: 'bag-item-info' },
@@ -1725,39 +1737,126 @@ async function executeQuickSell() {
   }
 }
 
+function formatListingAge(ageMs) {
+  if (!ageMs || ageMs < 60000) return 'agora há pouco';
+  const mins = Math.floor(ageMs / 60000);
+  if (mins < 60) return `há ${mins}m`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `há ${hours}h`;
+  const days = Math.floor(hours / 24);
+  return `há ${days}d`;
+}
+
 function renderBagMyListings() {
   const listings = state.bag.myListings || [];
-  $('#bag-my-listings-count').textContent = `${listings.length} ativos`;
+  const staleCount = listings.filter(l => l.isStale).length;
+  const undercutCount = listings.filter(l => l.isUndercut).length;
+  let countText = `${listings.length} ativos`;
+  if (undercutCount > 0) countText += ` · ⚠️ ${undercutCount} superados`;
+  if (staleCount > 0) countText += ` · ⏳ ${staleCount} >1 dia`;
+  $('#bag-my-listings-count').textContent = countText;
 
   const cards = listings.map(l => {
     const isDia = l.currency === 'DIAMONDS';
-    return el('div', { class: 'my-listing-card' },
+    const currSym = isDia ? '💎' : '$';
+    const ageText = formatListingAge(l.ageMs);
+
+    let statusPill = null;
+    if (l.isUndercut) {
+      statusPill = el('span', {
+        class: 'badge-undercut',
+        title: `Piso do mercado está em ${currSym} ${fmt(l.currentMinPrice)}. Sua oferta está ${currSym} ${fmt(l.priceDiff)} acima.`
+      }, `⚠️ Superado (Piso: ${currSym} ${fmt(l.currentMinPrice)})`);
+    } else if (l.currentMinPrice != null && l.price <= l.currentMinPrice) {
+      statusPill = el('span', {
+        class: 'badge-best-price',
+        title: 'Seu anúncio é a menor oferta ativa no mercado!'
+      }, `✅ Menor Preço`);
+    }
+
+    const staleBadge = l.isStale
+      ? el('span', { class: 'badge-stale', title: 'Publicado há mais de 24 horas sem vendas' }, '⏳ +1 dia')
+      : null;
+
+    const canRepost = (l.isUndercut || l.isStale) && l.currentMinPrice != null && l.currentMinPrice >= 1;
+    const repostTargetPrice = l.isUndercut && l.currentMinPrice > 1
+      ? Math.max(1, l.currentMinPrice - 1)
+      : Math.max(1, l.currentMinPrice || l.price);
+
+    const repostBtn = canRepost ? el('button', {
+      type: 'button',
+      class: 'btn-hardware small btn-repost',
+      title: l.isUndercut
+        ? `Ajusta para ${currSym} ${fmt(repostTargetPrice)} (1 a menos que o menor preço)`
+        : `Renova o anúncio no piso atual (${currSym} ${fmt(repostTargetPrice)})`,
+      onclick: async () => {
+        if (!confirm(`Reajustar ${l.name}?\n\nCancela o anúncio atual de ${currSym} ${fmt(l.price)} e reanuncia x${fmt(l.quantity)} por ${currSym} ${fmt(repostTargetPrice)} cada.`)) return;
+        try {
+          await api('/api/market/repost-item', {
+            method: 'POST',
+            body: {
+              accountId: state.bag.accountId,
+              listingId: l.id,
+              kind: l.kind || 'item',
+              refId: l.refId,
+              quantity: l.quantity,
+              price: repostTargetPrice,
+              currency: l.currency,
+              name: l.name
+            }
+          });
+          await loadBag(true);
+        } catch (err) {
+          alert(`Erro ao reajustar anúncio: ${err.message}`);
+        }
+      }
+    }, `⚡ Repostar no Piso`) : null;
+
+    return el('div', { class: `my-listing-card ${l.isStale ? 'is-stale' : ''} ${l.isUndercut ? 'is-undercut' : ''}` },
       el('div', { class: 'my-listing-left' },
+        el('div', { class: 'my-listing-icon-wrap' },
+          el('img', {
+            src: l.icon || '/favicon.svg',
+            alt: l.name,
+            loading: 'lazy',
+            onerror: (e) => {
+              if (!e.target.src.endsWith('/favicon.svg')) e.target.src = '/favicon.svg';
+            }
+          })
+        ),
         el('div', { class: 'my-listing-info' },
-          el('div', { class: 'my-listing-name' }, l.name),
-          el('div', { class: 'mono text-xs' },
+          el('div', { class: 'my-listing-name-row' },
+            el('span', { class: 'my-listing-name', title: l.name }, l.name),
+            staleBadge,
+            statusPill
+          ),
+          el('div', { class: 'mono text-xs my-listing-meta' },
             `Qtd: `, el('b', {}, fmt(l.quantity)), ` · `,
-            el('span', { class: isDia ? 'price-pill-dia' : 'price-pill-gold' }, `${isDia ? '💎' : '$'} ${fmt(l.price)}/un`)
+            el('span', { class: isDia ? 'price-pill-dia' : 'price-pill-gold' }, `${currSym} ${fmt(l.price)}/un`),
+            el('span', { class: 'badge-age muted' }, `(${ageText})`)
           )
         )
       ),
-      el('button', {
-        type: 'button',
-        class: 'btn-hardware-subtle small',
-        title: 'Cancelar anúncio e devolver itens para a bag',
-        onclick: async () => {
-          if (!confirm(`Cancelar anúncio de ${l.name}?`)) return;
-          try {
-            await api('/api/market/cancel-item', {
-              method: 'POST',
-              body: { accountId: state.bag.accountId, listingId: l.id }
-            });
-            await loadBag();
-          } catch (err) {
-            alert(`Erro ao cancelar: ${err.message}`);
+      el('div', { class: 'my-listing-actions' },
+        repostBtn,
+        el('button', {
+          type: 'button',
+          class: 'btn-hardware-subtle small',
+          title: 'Cancelar anúncio e devolver itens para a bag',
+          onclick: async () => {
+            if (!confirm(`Cancelar anúncio de ${l.name}?`)) return;
+            try {
+              await api('/api/market/cancel-item', {
+                method: 'POST',
+                body: { accountId: state.bag.accountId, listingId: l.id }
+              });
+              await loadBag(true);
+            } catch (err) {
+              alert(`Erro ao cancelar: ${err.message}`);
+            }
           }
-        }
-      }, '✕ Cancelar')
+        }, '✕ Cancelar')
+      )
     );
   });
 
@@ -1777,7 +1876,13 @@ function openItemPricingModal(item) {
   $('#item-pricing-npc').textContent = item.npcPrice ? `Piso NPC: $ ${fmt(item.npcPrice)}` : 'Piso NPC: —';
 
   const iconWrap = $('#item-pricing-icon');
-  iconWrap.replaceChildren(el('img', { src: item.icon || '/assets/markitems/pokeball.png', alt: item.name }));
+  iconWrap.replaceChildren(el('img', {
+    src: item.icon || '/favicon.svg',
+    alt: item.name,
+    onerror: (e) => {
+      if (!e.target.src.endsWith('/favicon.svg')) e.target.src = '/favicon.svg';
+    }
+  }));
 
   // Gold quotes
   $('#quote-gold-min').textContent = mkt.minGold != null ? `$ ${fmt(mkt.minGold)}` : '—';
@@ -2492,20 +2597,21 @@ async function stopAutoRoute() {
 // ---------- Breeder (Calculadora & Simulador PIW Oficial) ----------
 
 const BREEDER_FREE_BONUSES = [
-  { bonus: 0.005, probability: 0.50, label: 'Cenário 1 (+0.005)' },
-  { bonus: 0.010, probability: 0.35, label: 'Cenário 2 (+0.010)' },
-  { bonus: 0.020, probability: 0.12, label: 'Cenário 3 (+0.020)' },
-  { bonus: 0.040, probability: 0.03, label: 'Cenário 4 (+0.040)' }
+  { bonus: 0.005, probability: 0.50, label: 'Cenário 1' },
+  { bonus: 0.010, probability: 0.35, label: 'Cenário 2' },
+  { bonus: 0.020, probability: 0.12, label: 'Cenário 3' },
+  { bonus: 0.040, probability: 0.03, label: 'Cenário 4' }
 ];
 
 const BREEDER_PHERO_BONUSES = [
-  { bonus: 0.150, probability: 0.50, label: 'Cenário 1 (+0.150)' },
-  { bonus: 0.200, probability: 0.30, label: 'Cenário 2 (+0.200)' },
-  { bonus: 0.250, probability: 0.15, label: 'Cenário 3 (+0.250)' },
-  { bonus: 0.300, probability: 0.05, label: 'Cenário 4 (+0.300)' }
+  { bonus: 0.150, probability: 0.50, label: 'Cenário 1' },
+  { bonus: 0.200, probability: 0.30, label: 'Cenário 2' },
+  { bonus: 0.250, probability: 0.15, label: 'Cenário 3' },
+  { bonus: 0.300, probability: 0.05, label: 'Cenário 4' }
 ];
 
 const BREEDER_QUALITY_CAP = 2.600;
+const BREEDER_SHINY_PARTNER_MIN_Q = 1.600;
 
 async function loadBreeder(force = false) {
   const accountSelect = $('#breeder-account');
@@ -2514,13 +2620,15 @@ async function loadBreeder(force = false) {
   state.breeder.accountId = accountId;
 
   // Garante que temos a coleção da conta carregada para o simulador
-  if (!state.collection.items?.length || state.collection.accountId !== accountId) {
+  if (force || !state.collection.items?.length || state.collection.accountId !== accountId) {
     try {
       const res = await api(`/api/accounts/${encodeURIComponent(accountId)}/pokes`);
       state.collection.items = res.pokes || [];
       state.collection.accountId = accountId;
     } catch {}
   }
+
+  loadBreederCenter(accountId).catch(() => {});
 
   try {
     const data = await api(`/api/accounts/${encodeURIComponent(accountId)}/breeder`);
@@ -2530,6 +2638,123 @@ async function loadBreeder(force = false) {
     renderBreeder();
   } catch (err) {
     console.error('Erro ao carregar dados de breeder:', err);
+  }
+}
+
+async function loadBreederCenter(accountId = state.breeder.accountId) {
+  if (!accountId) return;
+  const grid = $('#breeder-incubator-grid');
+  const badge = $('#breeder-eggs-badge');
+  const resBar = $('#breeder-center-resources');
+
+  try {
+    const center = await api(`/api/accounts/${encodeURIComponent(accountId)}/breeding-center`);
+    state.breeder.center = center;
+
+    if (resBar) {
+      resBar.innerHTML = `
+        <span title="Feromônios disponíveis">🧪 Feromônios: <strong class="text-purple">${fmt(center.pheromones ?? 0)}</strong></span> ·
+        <span title="Gold da conta">💵 Gold: <strong class="text-amber">$ ${fmt(center.gold ?? 0)}</strong></span> ·
+        <span title="Diamantes da conta">💎 <strong class="text-cyan">${fmt(center.diamonds ?? 0)}</strong></span>
+      `;
+    }
+
+    if (!center.unlocked) {
+      if (badge) badge.textContent = `Bloqueada (Nv ${center.unlockLevel || 25})`;
+      if (grid) grid.innerHTML = `<div class="empty">A Creche (Breeding Center) desbloqueia no Nível ${center.unlockLevel || 25} (Nível atual: ${center.level || 1}).</div>`;
+      return;
+    }
+
+    const eggs = Array.isArray(center.eggs) ? center.eggs : [];
+    const usedSlots = center.usedSlots ?? eggs.length;
+    const maxSlots = center.slots ?? 1;
+    const readyCount = eggs.filter(e => e.ready || (e.killsDone >= e.killsRequired)).length;
+
+    if (badge) {
+      badge.textContent = `${usedSlots}/${maxSlots} slots · ${readyCount > 0 ? `🐣 ${readyCount} pronto(s)!` : `${eggs.length} incubando`}`;
+    }
+
+    if (!grid) return;
+    if (!eggs.length) {
+      grid.innerHTML = `<div class="empty" style="grid-column:1/-1">Nenhum ovo na incubadora no momento (${usedSlots}/${maxSlots} slots ocupados). Use a bancada abaixo para cruzar um par compatível!</div>`;
+      return;
+    }
+
+    const cards = eggs.map((egg, idx) => {
+      const done = Number(egg.killsDone || 0);
+      const req = Math.max(1, Number(egg.killsRequired || 1));
+      const pct = Math.min(100, Math.round((done / req) * 100));
+      const isReady = Boolean(egg.ready || done >= req);
+
+      return el('div', {
+        class: `breeder-match-card ${isReady ? 'is-perfect' : ''}`,
+        style: 'padding:0.85rem; display:flex; flex-direction:column; gap:0.55rem;'
+      },
+        el('div', { style: 'display:flex; justify-content:space-between; align-items:center;' },
+          el('div', { class: 'bold', style: 'display:flex; align-items:center; gap:0.4rem;' },
+            el('span', { style: 'font-size:1.25rem;' }, isReady ? '🐣' : '🥚'),
+            el('span', {}, `Ovo #${idx + 1} ${egg.shinyChild ? '✨ Shiny' : ''}`),
+            egg.rank ? el('span', { class: 'tag', style: '--tag:#38bdf8;' }, `Rank ${egg.rank}`) : null
+          ),
+          el('span', {
+            class: 'tag',
+            style: isReady ? '--tag:#22c55e; color:#86efac;' : '--tag:#f59e0b; color:#fde68a;'
+          }, isReady ? '✅ PRONTO PARA CHOCAR' : `⏳ ${pct}% (${fmt(done)}/${fmt(req)} kills)`)
+        ),
+        el('div', { style: 'height:8px; background:rgba(255,255,255,0.08); border-radius:999px; overflow:hidden;' },
+          el('div', {
+            style: `width:${pct}%; height:100%; background:${isReady ? '#22c55e' : 'linear-gradient(90deg,#f59e0b,#38bdf8)'}; transition:width .3s;`
+          })
+        ),
+        el('div', { style: 'display:flex; justify-content:flex-end; gap:0.5rem; margin-top:0.2rem;' },
+          isReady ? el('button', {
+            type: 'button',
+            class: 'btn-hardware-action small',
+            onclick: async () => {
+              try {
+                const res = await api(`/api/accounts/${encodeURIComponent(accountId)}/breeding-action`, {
+                  method: 'POST',
+                  body: { action: 'hatch', eggId: egg.id }
+                });
+                const p = res?.pokemon;
+                alert(p
+                  ? `🐣 Ovo chocado com sucesso!\n\nNasceu: ${p.shiny ? '✨ ' : ''}${p.name}\nQuality: ×${Number(p.quality || 1).toFixed(3)}\nIV Total: ${p.ivTotal || 0}/192`
+                  : '🐣 Ovo chocado com sucesso!');
+                await loadBreeder(true);
+              } catch (err) {
+                alert(`Erro ao chocar ovo: ${err.message}`);
+              }
+            }
+          }, '🐣 Chocar Ovo Agora') : null,
+          (!isReady && center.instantHatchCost) ? el('button', {
+            type: 'button',
+            class: 'btn-hardware-subtle small',
+            title: `Chocar instantaneamente por 💎 ${fmt(center.instantHatchCost)} Diamantes`,
+            onclick: async () => {
+              if (!confirm(`Chocar este ovo instantaneamente por 💎 ${fmt(center.instantHatchCost)} Diamantes?`)) return;
+              try {
+                const res = await api(`/api/accounts/${encodeURIComponent(accountId)}/breeding-action`, {
+                  method: 'POST',
+                  body: { action: 'hatch-now', eggId: egg.id }
+                });
+                const p = res?.pokemon;
+                alert(p
+                  ? `🐣 Ovo chocado!\nNasceu: ${p.shiny ? '✨ ' : ''}${p.name} (Q ×${Number(p.quality || 1).toFixed(3)} · IV ${p.ivTotal || 0}/192)`
+                  : '🐣 Ovo chocado!');
+                await loadBreeder(true);
+              } catch (err) {
+                alert(`Erro ao chocar: ${err.message}`);
+              }
+            }
+          }, `⚡ Chocar (💎 ${fmt(center.instantHatchCost)})`) : null
+        )
+      );
+    });
+
+    grid.replaceChildren(...cards);
+  } catch (err) {
+    if (badge) badge.textContent = 'Indisponível';
+    if (grid) grid.innerHTML = `<div class="empty">Não foi possível consultar a incubadora: ${err.message}</div>`;
   }
 }
 
@@ -2546,11 +2771,13 @@ function populateBreederSelects() {
   const s2 = $('#breeder-select-p2');
   if (!s1 || !s2) return;
 
-  const pokes = [...(state.collection.items || [])].sort((a, b) => {
-    const n = (a.name || '').localeCompare(b.name || '');
-    if (n !== 0) return n;
-    return (b.quality || 0) - (a.quality || 0);
-  });
+  const pokes = [...(state.collection.items || [])]
+    .filter(p => !p.starter && !p.isDitto && Number(p.speciesId) !== 132)
+    .sort((a, b) => {
+      const n = (a.name || '').localeCompare(b.name || '');
+      if (n !== 0) return n;
+      return (b.quality || 0) - (a.quality || 0);
+    });
 
   const buildOptions = (selectedId) => {
     const opts = ['<option value="">Selecione um Pokémon da conta...</option>'];
@@ -2558,8 +2785,9 @@ function populateBreederSelects() {
       const q = p.quality != null ? Number(p.quality).toFixed(3) : '1.000';
       const iv = p.ivTotal || 0;
       const sh = p.shiny ? '✨ ' : '';
+      const box = p.breedingBox ? '📦 ' : '';
       const sel = String(p.id) === String(selectedId) ? 'selected' : '';
-      opts.push(`<option value="${p.id}" ${sel}>${sh}${p.name} · Q ${q} · IV ${iv} (Nv ${p.level || 1})</option>`);
+      opts.push(`<option value="${p.id}" ${sel}>${box}${sh}${p.name} · Q ${q} · IV ${iv} (Nv ${p.level || 1})</option>`);
     }
     return opts.join('');
   };
@@ -2569,6 +2797,48 @@ function populateBreederSelects() {
 
   s1.innerHTML = buildOptions(curr1);
   s2.innerHTML = buildOptions(curr2);
+}
+
+function buildPokeStatChipsHtml(poke, isDonor) {
+  const hasIndividualIvs = poke.ivHp != null || poke.ivs?.hp != null;
+  if (hasIndividualIvs) {
+    const ivs = {
+      hp: poke.ivHp ?? poke.ivs?.hp ?? 0,
+      atk: poke.ivAttack ?? poke.ivs?.attack ?? 0,
+      def: poke.ivDefense ?? poke.ivs?.defense ?? 0,
+      spa: poke.ivSpecialAttack ?? poke.ivs?.specialAttack ?? 0,
+      spd: poke.ivSpecialDefense ?? poke.ivs?.specialDefense ?? 0,
+      vel: poke.ivSpeed ?? poke.ivs?.speed ?? 0
+    };
+    return [
+      { label: 'HP', val: ivs.hp },
+      { label: 'ATK', val: ivs.atk },
+      { label: 'DEF', val: ivs.def },
+      { label: 'SPA', val: ivs.spa },
+      { label: 'SPD', val: ivs.spd },
+      { label: 'VEL', val: ivs.vel }
+    ].map(c => `
+      <div class="slot-iv-chip ${isDonor ? 'donor-highlight' : ''}">
+        <span class="iv-name">${c.label}</span>
+        <span class="iv-val">${c.val}</span>
+      </div>
+    `).join('');
+  }
+
+  const st = poke.stats || {};
+  return [
+    { label: 'HP', val: st.hp ?? '—' },
+    { label: 'ATK', val: st.atk ?? st.attack ?? '—' },
+    { label: 'DEF', val: st.def ?? st.defense ?? '—' },
+    { label: 'SPA', val: st.spAtk ?? st.specialAttack ?? '—' },
+    { label: 'SPD', val: st.spDef ?? st.specialDefense ?? '—' },
+    { label: 'VEL', val: st.speed ?? '—' }
+  ].map(c => `
+    <div class="slot-iv-chip ${isDonor ? 'donor-highlight' : ''}" title="Atributo real no nível ${poke.level || 1}">
+      <span class="iv-name">${c.label}</span>
+      <span class="iv-val">${c.val}</span>
+    </div>
+  `).join('');
 }
 
 function renderBreederSlotDisplay(slotNum, poke, isDonor) {
@@ -2583,39 +2853,26 @@ function renderBreederSlotDisplay(slotNum, poke, isDonor) {
   const sprite = pokeSpriteUrl(poke.speciesId, poke.shiny);
   const fallback = pokeStaticSpriteUrl(poke.speciesId, poke.shiny);
   const qStr = Number(poke.quality || 1.0).toFixed(3);
-  const ivs = {
-    hp: poke.ivHp ?? poke.ivs?.hp ?? 0,
-    atk: poke.ivAttack ?? poke.ivs?.attack ?? 0,
-    def: poke.ivDefense ?? poke.ivs?.defense ?? 0,
-    spa: poke.ivSpecialAttack ?? poke.ivs?.specialAttack ?? 0,
-    spd: poke.ivSpecialDefense ?? poke.ivs?.specialDefense ?? 0,
-    vel: poke.ivSpeed ?? poke.ivs?.speed ?? 0
-  };
-
-  const chips = [
-    { label: 'HP', val: ivs.hp },
-    { label: 'ATK', val: ivs.atk },
-    { label: 'DEF', val: ivs.def },
-    { label: 'SPA', val: ivs.spa },
-    { label: 'SPD', val: ivs.spd },
-    { label: 'VEL', val: ivs.vel }
-  ].map(c => `
-    <div class="slot-iv-chip ${isDonor ? 'donor-highlight' : ''}">
-      <span class="iv-name">${c.label}</span>
-      <span class="iv-val">${c.val}</span>
-    </div>
-  `).join('');
+  const ivTotal = Number(poke.ivTotal || 0);
+  const ivPct = Math.min(100, Math.round((ivTotal / 192) * 100));
+  const chips = buildPokeStatChipsHtml(poke, isDonor);
+  const boxBadge = poke.breedingBox
+    ? `<span class="tag" style="--tag:#22c55e; color:#86efac; font-size:0.68rem;">📦 Na Breeding Box</span>`
+    : `<span class="tag" style="--tag:#64748b; color:#cbd5e1; font-size:0.68rem;">Fora da Box</span>`;
 
   container.innerHTML = `
     <div class="slot-poke-display">
       <img src="${sprite}" alt="${poke.name}" class="slot-poke-sprite" onerror="this.src='${fallback}'">
       <div class="slot-poke-info">
-        <div class="slot-poke-name">${poke.shiny ? '✨ ' : ''}${poke.name} <small class="muted mono">Nv ${poke.level || 1}</small></div>
+        <div class="slot-poke-name" style="display:flex; align-items:center; gap:0.4rem; flex-wrap:wrap;">
+          <span>${poke.shiny ? '✨ ' : ''}${poke.name} <small class="muted mono">Nv ${poke.level || 1}</small></span>
+          ${boxBadge}
+        </div>
         <div class="slot-poke-stats">
           <span class="mono bold text-amber">Quality: ×${qStr}</span>
-          <span class="mono bold text-cyan">IV Total: ${poke.ivTotal || 0}/192</span>
+          <span class="mono bold text-cyan">IV Total: ${ivTotal}/192 (${ivPct}%)</span>
         </div>
-        ${isDonor ? '<div class="mono text-xs text-green" style="font-weight:700;">⭐ Doador Oficial de IVs (Maior Quality)</div>' : ''}
+        ${isDonor ? '<div class="mono text-xs text-green" style="font-weight:700;">⭐ Doador Oficial de IVs & Quality Base</div>' : ''}
         <div class="slot-iv-chips">${chips}</div>
       </div>
     </div>
@@ -2630,15 +2887,25 @@ function updateBreederSimulator() {
   state.breeder.sim.parent1Id = id1;
   state.breeder.sim.parent2Id = id2;
 
-  const modeRadio = document.querySelector('input[name="breed-mode"]:checked');
-  const mode = modeRadio?.value || 'free';
-  const doubleStones = Boolean($('#breed-double-stones')?.checked);
-  state.breeder.sim.mode = mode;
-  state.breeder.sim.doubleStones = doubleStones;
-
   const pokes = state.collection.items || [];
   const p1 = pokes.find(p => String(p.id) === String(id1));
   const p2 = pokes.find(p => String(p.id) === String(id2));
+
+  const hasShiny = Boolean(p1?.shiny || p2?.shiny);
+  const freeRadio = document.querySelector('input[name="breed-mode"][value="free"]');
+  const pheroRadio = document.querySelector('input[name="breed-mode"][value="pheromone"]');
+  if (hasShiny && freeRadio && pheroRadio) {
+    freeRadio.disabled = true;
+    pheroRadio.checked = true;
+  } else if (freeRadio) {
+    freeRadio.disabled = false;
+  }
+
+  const modeRadio = document.querySelector('input[name="breed-mode"]:checked');
+  const mode = hasShiny ? 'pheromone' : (modeRadio?.value || 'free');
+  const doubleStones = Boolean($('#breed-double-stones')?.checked);
+  state.breeder.sim.mode = mode;
+  state.breeder.sim.doubleStones = doubleStones;
 
   const diffEl = $('#breeder-diff-display');
   const compatEl = $('#breeder-compat-status');
@@ -2679,15 +2946,40 @@ function updateBreederSimulator() {
     return;
   }
 
-  // Ambos selecionados: validação das regras oficiais do PIW
+  if (String(p1.id) === String(p2.id)) {
+    renderBreederSlotDisplay(1, p1, false);
+    renderBreederSlotDisplay(2, p2, false);
+    if (compatEl) {
+      compatEl.textContent = '❌ Escolha dois exemplares diferentes';
+      compatEl.className = 'breeder-compat-badge compat-err';
+    }
+    if (resultsPanel) resultsPanel.style.display = 'none';
+    return;
+  }
+
+  // Ambos selecionados: validação das regras oficiais do PIW (v1.9+)
   const sameSpecies = (p1.speciesId && p2.speciesId && p1.speciesId === p2.speciesId) ||
     (p1.name && p2.name && p1.name.toLowerCase() === p2.name.toLowerCase());
 
   const q1 = Math.round((Number(p1.quality) || 1.0) * 1000) / 1000;
   const q2 = Math.round((Number(p2.quality) || 1.0) * 1000) / 1000;
   const diffQ = Math.round(Math.abs(q1 - q2) * 1000) / 1000;
+  const oneShiny = Boolean(p1.shiny) !== Boolean(p2.shiny);
 
   if (diffEl) diffEl.textContent = `Δ Q: ${diffQ.toFixed(3)}`;
+
+  if (p1.starter || p2.starter || p1.isDitto || p2.isDitto || Number(p1.speciesId) === 132 || Number(p2.speciesId) === 132) {
+    renderBreederSlotDisplay(1, p1, false);
+    renderBreederSlotDisplay(2, p2, false);
+    if (compatEl) {
+      compatEl.textContent = '❌ Pokémon Inicial (Starter) e Ditto não podem cruzar';
+      compatEl.className = 'breeder-compat-badge compat-err';
+    }
+    if (heartEl) heartEl.textContent = '🚫';
+    if (statusBadge) statusBadge.textContent = 'Bloqueado';
+    if (resultsPanel) resultsPanel.style.display = 'none';
+    return;
+  }
 
   if (!sameSpecies) {
     renderBreederSlotDisplay(1, p1, false);
@@ -2702,7 +2994,21 @@ function updateBreederSimulator() {
     return;
   }
 
-  if (diffQ > 0.150001) {
+  if (oneShiny) {
+    const partnerQ = p1.shiny ? q2 : q1;
+    if (partnerQ + 0.0001 < BREEDER_SHINY_PARTNER_MIN_Q) {
+      renderBreederSlotDisplay(1, p1, false);
+      renderBreederSlotDisplay(2, p2, false);
+      if (compatEl) {
+        compatEl.textContent = `❌ Parceiro precisa de Q ≥ ${BREEDER_SHINY_PARTNER_MIN_Q.toFixed(2)} para cruzar com Shiny (atual: ×${partnerQ.toFixed(3)})`;
+        compatEl.className = 'breeder-compat-badge compat-err';
+      }
+      if (heartEl) heartEl.textContent = '⚠️';
+      if (statusBadge) statusBadge.textContent = 'Parceiro Q baixo';
+      if (resultsPanel) resultsPanel.style.display = 'none';
+      return;
+    }
+  } else if (diffQ > 0.150001) {
     renderBreederSlotDisplay(1, p1, false);
     renderBreederSlotDisplay(2, p2, false);
     if (compatEl) {
@@ -2716,12 +3022,24 @@ function updateBreederSimulator() {
   }
 
   // 100% COMPATÍVEL!
-  const inheritsFromSlot = q2 > q1 ? 2 : 1;
+  // Regra oficial: se apenas 1 pai for Shiny, o Shiny é SEMPRE o doador de IVs e Quality Base!
+  let inheritsFromSlot;
+  let partnerExcess = null;
+  if (p1.shiny && !p2.shiny) {
+    inheritsFromSlot = 1;
+    if (q2 > q1) partnerExcess = { shinyQ: q1, partnerQ: q2, excess: Math.round((q2 - q1) * 1000) / 1000 };
+  } else if (p2.shiny && !p1.shiny) {
+    inheritsFromSlot = 2;
+    if (q1 > q2) partnerExcess = { shinyQ: q2, partnerQ: q1, excess: Math.round((q1 - q2) * 1000) / 1000 };
+  } else {
+    inheritsFromSlot = q2 > q1 ? 2 : 1;
+  }
+
   renderBreederSlotDisplay(1, p1, inheritsFromSlot === 1);
   renderBreederSlotDisplay(2, p2, inheritsFromSlot === 2);
 
   if (compatEl) {
-    compatEl.textContent = '✅ Par 100% Compatível!';
+    compatEl.textContent = hasShiny ? '✨ Par Shiny Compatível!' : '✅ Par 100% Compatível!';
     compatEl.className = 'breeder-compat-badge compat-ok';
   }
   if (heartEl) heartEl.textContent = '💖';
@@ -2729,7 +3047,7 @@ function updateBreederSimulator() {
 
   // Executa Projeção Matemática
   const donor = inheritsFromSlot === 2 ? p2 : p1;
-  const baseQ = Math.max(q1, q2);
+  const baseQ = inheritsFromSlot === 2 ? q2 : q1;
   const bonuses = mode === 'pheromone' ? BREEDER_PHERO_BONUSES : BREEDER_FREE_BONUSES;
   const scenarios = bonuses.map(b => {
     const rawQ = Math.round((baseQ + b.bonus) * 1000) / 1000;
@@ -2747,38 +3065,41 @@ function updateBreederSimulator() {
   // 1. Herança de IVs
   const ivInfo = $('#breeder-iv-heritage-info');
   if (ivInfo) {
-    ivInfo.innerHTML = `O filhote herda <strong>100% dos IVs do Slot ${inheritsFromSlot} (${donor.name})</strong>, porque possui maior Quality (<strong>Q ${inheritsFromSlot === 1 ? q1.toFixed(3) : q2.toFixed(3)}</strong> vs Q ${inheritsFromSlot === 1 ? q2.toFixed(3) : q1.toFixed(3)}).`;
+    if (oneShiny) {
+      ivInfo.innerHTML = `O filhote herda <strong>100% dos IVs e a Quality base do pai Shiny — Slot ${inheritsFromSlot} (${donor.name}, Q ${baseQ.toFixed(3)})</strong>.`;
+    } else {
+      ivInfo.innerHTML = `O filhote herda <strong>100% dos IVs do Slot ${inheritsFromSlot} (${donor.name})</strong>, porque possui maior Quality (<strong>Q ${inheritsFromSlot === 1 ? q1.toFixed(3) : q2.toFixed(3)}</strong> vs Q ${inheritsFromSlot === 1 ? q2.toFixed(3) : q1.toFixed(3)}).`;
+    }
   }
 
   const ivStatsGrid = $('#breeder-inherited-stats-grid');
   if (ivStatsGrid) {
-    const dIvs = {
-      hp: donor.ivHp ?? donor.ivs?.hp ?? 0,
-      atk: donor.ivAttack ?? donor.ivs?.attack ?? 0,
-      def: donor.ivDefense ?? donor.ivs?.defense ?? 0,
-      spa: donor.ivSpecialAttack ?? donor.ivs?.specialAttack ?? 0,
-      spd: donor.ivSpecialDefense ?? donor.ivs?.specialDefense ?? 0,
-      vel: donor.ivSpeed ?? donor.ivs?.speed ?? 0
-    };
+    const donorIvTotal = Number(donor.ivTotal || 0);
+    const ivPct = Math.min(100, Math.round((donorIvTotal / 192) * 100));
+    const chipsHtml = buildPokeStatChipsHtml(donor, true);
     ivStatsGrid.innerHTML = `
-      <div class="slot-iv-chips" style="margin-top:6px;">
-        <div class="slot-iv-chip donor-highlight"><span class="iv-name">HP</span><span class="iv-val">${dIvs.hp}</span></div>
-        <div class="slot-iv-chip donor-highlight"><span class="iv-name">ATK</span><span class="iv-val">${dIvs.atk}</span></div>
-        <div class="slot-iv-chip donor-highlight"><span class="iv-name">DEF</span><span class="iv-val">${dIvs.def}</span></div>
-        <div class="slot-iv-chip donor-highlight"><span class="iv-name">SPA</span><span class="iv-val">${dIvs.spa}</span></div>
-        <div class="slot-iv-chip donor-highlight"><span class="iv-name">SPD</span><span class="iv-val">${dIvs.spd}</span></div>
-        <div class="slot-iv-chip donor-highlight"><span class="iv-name">VEL</span><span class="iv-val">${dIvs.vel}</span></div>
+      <div class="slot-iv-chips" style="margin-top:6px;">${chipsHtml}</div>
+      <div style="margin-top:8px;">
+        <div style="display:flex; justify-content:space-between; font-size:0.75rem;" class="mono bold text-cyan">
+          <span>Total Herdado: ${donorIvTotal}/192 IVs (${ivPct}%)</span>
+          <span>${donorIvTotal < 192 ? (doubleStones ? '✨ +1 IV possível (5%)' : 'Use Double Stones p/ +1 IV') : '🏆 IV Máximo (192)'}</span>
+        </div>
+        <div style="height:6px; background:rgba(255,255,255,0.08); border-radius:999px; overflow:hidden; margin-top:4px;">
+          <div style="width:${ivPct}%; height:100%; background:linear-gradient(90deg,#06b6d4,#22c55e);"></div>
+        </div>
       </div>
-      <div class="mono bold text-cyan text-xs" style="margin-top:4px;">Total Herdado: ${donor.ivTotal || 0}/192 IVs</div>
     `;
   }
 
   const warnBox = $('#breeder-heritage-warning');
   if (warnBox) {
-    if (inheritsFromSlot === 2 && (p1.ivTotal || 0) > (p2.ivTotal || 0)) {
+    if (partnerExcess) {
+      warnBox.style.display = 'block';
+      warnBox.innerHTML = `⚠️ <strong>Excedente de Parceiro Ignorado:</strong> O parceiro normal tem Quality maior que o Shiny (×${partnerExcess.partnerQ.toFixed(3)} > ×${partnerExcess.shinyQ.toFixed(3)}). Pela regra do jogo, o excedente (+${partnerExcess.excess.toFixed(3)}) é ignorado e o filhote usa a Quality base do Shiny (×${partnerExcess.shinyQ.toFixed(3)}).`;
+    } else if (!oneShiny && inheritsFromSlot === 2 && (p1.ivTotal || 0) > (p2.ivTotal || 0)) {
       warnBox.style.display = 'block';
       warnBox.innerHTML = `⚠️ <strong>Atenção de Estratégia:</strong> O Slot 2 possui maior Quality e substituirá os IVs do Slot 1! O filhote nascerá com IV ${p2.ivTotal || 0} em vez de IV ${p1.ivTotal || 0}. Se você queria os IVs do Slot 1, ele precisaria ter a maior Quality.`;
-    } else if (q1 === q2) {
+    } else if (!oneShiny && q1 === q2) {
       warnBox.style.display = 'block';
       warnBox.innerHTML = `ℹ️ <strong>Empate de Quality:</strong> Ambos os pais possuem exatamente Q ${q1.toFixed(3)}. Pela regra do jogo, os IVs foram herdados do <strong>Slot 1</strong>.`;
     } else {
@@ -2793,7 +3114,7 @@ function updateBreederSimulator() {
 
   const tbody = $('#breeder-scenarios-tbody');
   if (tbody) {
-    tbody.innerHTML = scenarios.map((s, idx) => `
+    tbody.innerHTML = scenarios.map(s => `
       <tr>
         <td class="bold">${s.label}</td>
         <td class="mono">${Math.round(s.probability * 100)}%</td>
@@ -2804,7 +3125,7 @@ function updateBreederSimulator() {
     `).join('');
   }
 
-  // 3. Custos & Extras
+  // 3. Custos & Execução ao Vivo
   const costsList = $('#breeder-costs-list');
   if (costsList) {
     const stoneQty = doubleStones ? 40 : 20;
@@ -2812,17 +3133,89 @@ function updateBreederSimulator() {
     costsList.innerHTML = `
       <div class="cost-row"><span>💵 Gold Obrigatório:</span><strong class="mono text-amber">R$ 2.000.000</strong></div>
       <div class="cost-row"><span>💎 Evolution Stones:</span><strong class="mono text-cyan">${stoneQty} Stones</strong></div>
-      <div class="cost-row"><span>🧪 Strange Pheromones:</span><strong class="mono ${pheroQty > 0 ? 'text-purple' : 'muted'}">${pheroQty} Pheromones</strong></div>
-      ${doubleStones ? '<div class="cost-row" style="background:rgba(6,182,212,0.15);"><span>✨ Double Stones Ativo:</span><strong class="text-cyan mono">5% de chance de +1 IV aleatório</strong></div>' : ''}
+      <div class="cost-row"><span>🧪 Strange Pheromones:</span><strong class="mono ${pheroQty > 0 ? 'text-purple' : 'muted'}">${pheroQty} Pheromones${hasShiny ? ' (Obrigatório p/ Shiny)' : ''}</strong></div>
+      ${doubleStones ? '<div class="cost-row" style="background:rgba(6,182,212,0.15);"><span>✨ Double Stones Ativo:</span><strong class="text-cyan mono">5% de chance de +1 IV</strong></div>' : ''}
     `;
   }
 
   const shinyBox = $('#breeder-shiny-chance-box');
   if (shinyBox) {
-    const hasShiny = Boolean(p1.shiny || p2.shiny);
     shinyBox.innerHTML = hasShiny
-      ? '✨ <strong>Filhote 100% Shiny Garantido!</strong> (Um dos pais é Shiny)'
-      : '🎲 <strong>5% de chance espontânea</strong> de o ovo chocar Shiny.';
+      ? '✨ <strong>Filhote 100% Shiny Garantido!</strong> (Cruza com Shiny exige Feromônios e garante Shiny)'
+      : 'ℹ️ <strong>Filhote Normal (0% Shiny)</strong> — dois pais normais nunca geram Shiny no PIW.';
+  }
+
+  const liveActions = $('#breeder-live-actions');
+  if (liveActions) {
+    const bothInBox = Boolean(p1.breedingBox && p2.breedingBox);
+    const missingBoxIds = [p1, p2].filter(p => !p.breedingBox && !p.team).map(p => p.id);
+
+    const btns = [];
+    if (!bothInBox && missingBoxIds.length > 0) {
+      btns.push(el('button', {
+        type: 'button',
+        class: 'btn-hardware-subtle small',
+        onclick: async () => {
+          try {
+            await api(`/api/accounts/${encodeURIComponent(state.breeder.accountId)}/breedbox-move`, {
+              method: 'POST',
+              body: { dir: 'in', pokeIds: missingBoxIds }
+            });
+            p1.breedingBox = true;
+            p2.breedingBox = true;
+            updateBreederSimulator();
+          } catch (err) {
+            alert(`Erro ao mover para a Breeding Box: ${err.message}`);
+          }
+        }
+      }, '📦 Mover Pais para a Breeding Box'));
+    }
+
+    btns.push(el('button', {
+      type: 'button',
+      class: 'btn-hardware-action small',
+      onclick: async () => {
+        try {
+          const quote = await api(`/api/accounts/${encodeURIComponent(state.breeder.accountId)}/breeding-quote?parent1=${encodeURIComponent(p1.id)}&parent2=${encodeURIComponent(p2.id)}&free=${mode === 'free' ? '1' : '0'}`);
+          const stoneList = (doubleStones ? quote.stones?.double : quote.stones?.base) || [];
+          const stonesText = stoneList.map(s => `${s.need}x ${s.name} (você tem ${s.have})`).join(', ') || 'Stones suficientes';
+          const msg = [
+            `📋 Cotação Oficial do Servidor PIW:`,
+            `• Filhote: ${quote.shinyChild ? '✨ Shiny ' : ''}Rank ${quote.rank || '—'}`,
+            `• Quality Projetada: ×${Number(quote.delta?.minQuality || qMin).toFixed(3)} a ×${Number(quote.delta?.maxQuality || qMax).toFixed(3)}`,
+            `• IV Herdado: ${quote.ivPreview?.ivTotal ?? donor.ivTotal}/192`,
+            `• Taxa: $ ${fmt(quote.goldFee ?? 2000000)} + ${quote.pheromoneCost ?? 0} Feromônios (você tem ${quote.pheromonesHave ?? 0})`,
+            `• Pedras: ${stonesText}`,
+            `• Kills p/ Chocar: ${fmt(quote.killsRequired ?? 0)} kills`,
+            ``,
+            `Deseja iniciar esta cruza na Creche agora?`
+          ].join('\n');
+          if (!confirm(msg)) return;
+          if (!p1.breedingBox || !p2.breedingBox) {
+            await api(`/api/accounts/${encodeURIComponent(state.breeder.accountId)}/breedbox-move`, {
+              method: 'POST',
+              body: { dir: 'in', pokeIds: [p1.id, p2.id] }
+            });
+          }
+          await api(`/api/accounts/${encodeURIComponent(state.breeder.accountId)}/breeding-action`, {
+            method: 'POST',
+            body: {
+              action: 'breed',
+              parent1: p1.id,
+              parent2: p2.id,
+              free: mode === 'free',
+              double: doubleStones
+            }
+          });
+          alert('🥚 Cruza iniciada com sucesso! O ovo foi colocado na Incubadora.');
+          await loadBreeder(true);
+        } catch (err) {
+          alert(`Não foi possível cruzar no servidor: ${err.message}`);
+        }
+      }
+    }, '🥚 Cotar & Cruzar na Creche do Jogo'));
+
+    liveActions.replaceChildren(...btns);
   }
 }
 
@@ -2866,18 +3259,23 @@ function renderBreeder() {
     }
 
     const cards = pairs.map(p => {
-      const isPerfect = p.tier === 'PERFEITO';
+      const isPerfect = p.tier === 'PERFEITO' || p.tier === 'SHINY PRONTO';
       const starIcons = '⭐'.repeat(p.stars || 1);
-      const donorSlot = p.simFree?.inheritsFromSlot || 1;
+      const mainSim = p.simFree || p.simPhero;
+      const donorSlot = mainSim?.inheritsFromSlot || 1;
 
       const renderParent = (parent, isD) => el('div', { class: `breeder-parent-box ${isD ? 'donor-box' : ''}` },
-        el('img', { src: pokeStaticSpriteUrl(parent.speciesId), class: 'breeder-parent-sprite', alt: parent.name, onerror: e => e.target.style.display = 'none' }),
+        el('img', { src: pokeStaticSpriteUrl(parent.speciesId, parent.shiny), class: 'breeder-parent-sprite', alt: parent.name, onerror: e => e.target.style.display = 'none' }),
         el('div', { class: 'breeder-parent-details' },
-          el('span', { class: `breeder-parent-role ${isD ? 'role-iv' : 'role-q'}` }, isD ? 'Doador de IV' : 'Parceiro Q'),
-          el('span', { class: 'breeder-parent-name' }, `${parent.shiny ? '✨ ' : ''}${parent.name}`),
-          el('span', { class: 'mono text-xs muted' }, `IV ${parent.ivTotal} · Q ${parent.quality.toFixed(3)}`)
+          el('span', { class: `breeder-parent-role ${isD ? 'role-iv' : 'role-q'}` }, isD ? 'Doador (IV & Q)' : 'Parceiro Q'),
+          el('span', { class: 'breeder-parent-name' }, `${parent.breedingBox ? '📦 ' : ''}${parent.shiny ? '✨ ' : ''}${parent.name}`),
+          el('span', { class: 'mono text-xs muted' }, `IV ${parent.ivTotal}/192 · Q ${parent.quality.toFixed(3)}`)
         )
       );
+
+      const expectedSummary = p.hasShiny
+        ? `✨ Shiny · IV ${mainSim?.donorIvTotal || '—'} · Q ~${p.simPhero?.expectedQuality?.toFixed(3) || '—'} (Phero)`
+        : `IV ${mainSim?.donorIvTotal || '—'} · Q ~${p.simFree?.expectedQuality?.toFixed(3) || '—'} (Free) / ~${p.simPhero?.expectedQuality?.toFixed(3) || '—'} (Phero)`;
 
       return el('div', { class: `breeder-match-card ${isPerfect ? 'is-perfect' : ''}` },
         el('div', { class: 'breeder-card-top' },
@@ -2900,7 +3298,7 @@ function renderBreeder() {
         ),
         el('div', { class: 'breeder-result-bar' },
           el('span', { class: 'bold' }, '✨ Filhote Esperado:'),
-          el('span', { class: 'mono pos bold' }, `IV ${p.simFree?.donorIvTotal || '—'} · Q ~${p.simFree?.expectedQuality?.toFixed(3) || '—'} (Free) / ~${p.simPhero?.expectedQuality?.toFixed(3) || '—'} (Phero)`)
+          el('span', { class: 'mono pos bold' }, expectedSummary)
         )
       );
     });
@@ -3464,7 +3862,10 @@ function bindUi() {
     btn.addEventListener('click', () => setBreederView(btn.dataset.bview));
   }
 
-  setInterval(renderAccounts, 5000);
+  setInterval(() => {
+    renderAccounts();
+    updateSessionShinyTimes();
+  }, 5000);
 }
 
 initTheme();

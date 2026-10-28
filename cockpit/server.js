@@ -87,8 +87,10 @@ async function loadSpecies(api) {
 
 function resolveItemIcon(icon) {
   if (!icon) return null;
-  if (/^(https?:)?\//.test(icon)) return icon;
-  return `/assets/items/${icon}`;
+  if (/^https?:\/\//i.test(icon)) return icon;
+  const clean = String(icon).trim();
+  if (clean.startsWith('/')) return clean;
+  return `/assets/items/${clean}`;
 }
 
 async function loadItems(api) {
@@ -241,7 +243,7 @@ function createApp({ store, api, species, itemsCatalog }) {
         junk.set(account.id, [...(junk.get(account.id) ?? []), at]);
         return;
       }
-      const hlCfg = store.config.highlight || { minQuality: 1.7, minIv: 130 };
+      const hlCfg = store.config.highlight || { minQuality: 1.7, minIv: 150 };
       const isGoodCatch = Boolean(
         item.isDitto ||
         (item.quality != null && item.ivTotal != null &&
@@ -447,6 +449,7 @@ function createApp({ store, api, species, itemsCatalog }) {
 
   let cachedItemsMarket = null;
   let lastItemsMarketFetch = 0;
+  const cachedMineByAccount = new Map();
 
   function formatItemsMarketSummary(payload, account) {
     const listings = Array.isArray(payload?.listings) ? payload.listings : [];
@@ -493,16 +496,35 @@ function createApp({ store, api, species, itemsCatalog }) {
       };
     }
 
-    const mine = Array.isArray(payload?.mine) ? payload.mine.map(m => ({
-      id: String(m.id ?? ''),
-      refId: Number(m.refId ?? m.id),
-      kind: m.kind || 'item',
-      name: m.name || m.pokemon?.name || 'Item',
-      quantity: Number(m.quantity) || 1,
-      price: Number(m.price ?? m.totalPrice),
-      currency: String(m.currency ?? 'GOLD').toUpperCase(),
-      at: m.at ?? null
-    })) : [];
+    const rawMine = (account && cachedMineByAccount.get(account.id)?.mine) || (Array.isArray(payload?.mine) ? payload.mine : []);
+    const mine = rawMine.map(m => {
+      const kind = m.kind || 'item';
+      const refId = Number(m.refId ?? m.id);
+      const k = `${kind}:${refId}`;
+      const itemMkt = summary[k];
+      const currency = String(m.currency ?? 'GOLD').toUpperCase();
+      const currentMin = currency === 'DIAMONDS' ? itemMkt?.minDia : itemMkt?.minGold;
+      const myPrice = Number(m.price ?? m.totalPrice);
+      const meta = itemsCatalog?.get(refId);
+      const atTime = m.at ? new Date(m.at).getTime() : null;
+      const ageMs = atTime ? Math.max(0, Date.now() - atTime) : 0;
+      return {
+        id: String(m.id ?? ''),
+        refId,
+        kind,
+        name: m.name || m.pokemon?.name || meta?.name || 'Item',
+        quantity: Number(m.quantity) || 1,
+        price: myPrice,
+        currency,
+        at: m.at ?? null,
+        ageMs,
+        isStale: Boolean(ageMs > 86400000),
+        currentMinPrice: currentMin ?? null,
+        isUndercut: Boolean(currentMin && myPrice > currentMin),
+        priceDiff: currentMin ? Math.max(0, myPrice - currentMin) : 0,
+        icon: resolveItemIcon(m.icon || meta?.icon)
+      };
+    });
 
     return { at: Date.now(), summary, mine };
   }
@@ -516,13 +538,18 @@ function createApp({ store, api, species, itemsCatalog }) {
       account = list[0];
     }
 
-    if (cachedItemsMarket && now - lastItemsMarketFetch < 45 * 1000) {
+    const mineEntry = cachedMineByAccount.get(account.id);
+    const hasFreshMine = mineEntry && (now - mineEntry.at < 45 * 1000);
+    const hasFreshListings = cachedItemsMarket && (now - lastItemsMarketFetch < 45 * 1000);
+
+    if (hasFreshListings && hasFreshMine) {
       return formatItemsMarketSummary(cachedItemsMarket, account);
     }
 
     const payload = await account.withAuth(token => api.marketCategory(token, 'All'));
     cachedItemsMarket = payload;
     lastItemsMarketFetch = now;
+    cachedMineByAccount.set(account.id, { at: now, mine: Array.isArray(payload?.mine) ? payload.mine : [] });
     return formatItemsMarketSummary(payload, account);
   }
 
@@ -566,7 +593,7 @@ function createApp({ store, api, species, itemsCatalog }) {
             name: b.name || `Ball #${b.id}`,
             category: 'ball',
             quantity: count,
-            npcPrice: b.priceGold ? Math.floor(b.priceGold / 2) : 1,
+            npcPrice: b.priceGold ? Math.max(1, Number(b.priceGold)) : 1,
             priceGold: b.priceGold ?? null,
             rare: false,
             icon: resolveItemIcon(b.iconUrl),
@@ -664,6 +691,7 @@ function createApp({ store, api, species, itemsCatalog }) {
 
     // Invalida cache do mercado e atualiza a bag
     cachedItemsMarket = null;
+    cachedMineByAccount.delete(account.id);
     account.refreshBag();
     return { results };
   }
@@ -678,8 +706,39 @@ function createApp({ store, api, species, itemsCatalog }) {
       text: `✕ Anúncio ${listingId} cancelado no mercado.`
     });
     cachedItemsMarket = null;
+    cachedMineByAccount.delete(account.id);
     account.refreshBag();
     return res;
+  }
+
+  async function repostListing(account, { listingId, kind = 'item', refId, quantity, price, currency = 'GOLD', name }) {
+    if (!listingId) throw httpError(400, 'ID do anúncio obrigatório.');
+    const numPrice = Math.max(1, Math.floor(Number(price) || 0));
+    const numQty = Math.max(1, Math.floor(Number(quantity) || 1));
+    const curr = currency === 'DIAMONDS' ? 'DIAMONDS' : 'GOLD';
+
+    await account.withAuth(token => api.marketAction(token, { action: 'cancel', id: String(listingId) }));
+    await new Promise(r => setTimeout(r, 150));
+
+    const res = await account.listItem({
+      kind,
+      refId: Number(refId),
+      quantity: numQty,
+      price: numPrice,
+      currency: curr
+    });
+
+    pushLog({
+      at: Date.now(),
+      account: account.id,
+      accountName: account.name,
+      text: `⚡ Anúncio reajustado no mercado: x${numQty.toLocaleString('pt-BR')} ${name || `${kind}:${refId}`} por ${curr === 'DIAMONDS' ? '💎' : '$'} ${numPrice.toLocaleString('pt-BR')} cada.`
+    });
+
+    cachedItemsMarket = null;
+    cachedMineByAccount.delete(account.id);
+    account.refreshBag();
+    return { ok: true, res };
   }
 
   let radarMatches = [];
@@ -848,13 +907,16 @@ function createApp({ store, api, species, itemsCatalog }) {
       if (body.lastHunt) account.setHunt(body.lastHunt);
       const releaseAt = Date.now();
       heartbeats.set(account.id, releaseAt);
-      setTimeout(() => {
+      const delayMs = process.env.NODE_ENV === 'test' ? 0 : 8000;
+      const doRelease = () => {
         if (account.state.status === 'handedOff' && (heartbeats.get(account.id) ?? 0) <= releaseAt) {
           heartbeats.set(account.id, 0);
           account.resume();
           pushLog({ at: Date.now(), account: account.id, accountName: account.name, text: 'Aba do jogo fechada; Cockpit reassumiu.' });
         }
-      }, 8000).unref?.();
+      };
+      if (delayMs > 0) setTimeout(doRelease, delayMs).unref?.();
+      else doRelease();
       return sendJson(res, 200, { ok: true, accountId: account.id });
     }
     throw httpError(404, 'Rota da ponte não encontrada.');
@@ -880,6 +942,43 @@ function createApp({ store, api, species, itemsCatalog }) {
       res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-store' });
       if (req.method === 'HEAD') return res.end();
       return fs.createReadStream(path.join(__dirname, file)).pipe(res);
+    }
+
+    if ((req.method === 'GET' || req.method === 'HEAD') && p.startsWith('/assets/')) {
+      const sanitized = path.normalize(p).replace(/^(\.\.[\/\\])+/, '');
+      const cacheFile = path.join(CACHE_DIR, sanitized);
+      const ext = path.extname(p).toLowerCase();
+      const mimeTypes = {
+        '.png': 'image/png', '.gif': 'image/gif', '.jpg': 'image/jpeg',
+        '.jpeg': 'image/jpeg', '.svg': 'image/svg+xml', '.webp': 'image/webp'
+      };
+      const contentType = mimeTypes[ext] || 'application/octet-stream';
+
+      if (fs.existsSync(cacheFile)) {
+        res.writeHead(200, {
+          'Content-Type': contentType,
+          'Cache-Control': 'public, max-age=604800, immutable',
+          'Access-Control-Allow-Origin': '*'
+        });
+        if (req.method === 'HEAD') return res.end();
+        return fs.createReadStream(cacheFile).pipe(res);
+      }
+      try {
+        const upstream = await fetch(`https://poke.idleworld.online${p}`);
+        if (upstream.ok) {
+          const buffer = Buffer.from(await upstream.arrayBuffer());
+          fs.mkdirSync(path.dirname(cacheFile), { recursive: true });
+          fs.writeFileSync(cacheFile, buffer);
+          res.writeHead(200, {
+            'Content-Type': upstream.headers.get('content-type') || contentType,
+            'Cache-Control': 'public, max-age=604800, immutable',
+            'Access-Control-Allow-Origin': '*'
+          });
+          if (req.method === 'HEAD') return res.end();
+          return res.end(buffer);
+        }
+      } catch {}
+      throw httpError(404, 'Asset não encontrado.');
     }
 
     if ((req.method === 'GET' || req.method === 'HEAD') && p === '/piw.user.js') {
@@ -987,6 +1086,11 @@ function createApp({ store, api, species, itemsCatalog }) {
       const account = getAccount(body.accountId);
       return sendJson(res, 200, await cancelListing(account, body.listingId));
     }
+    if (req.method === 'POST' && p === '/api/market/repost-item') {
+      const body = await readBody(req);
+      const account = getAccount(body.accountId);
+      return sendJson(res, 200, await repostListing(account, body));
+    }
 
     if (req.method === 'GET' && p === '/api/radar') return sendJson(res, 200, { wishlist: store.getWishlist(), matches: radarMatches });
     if (req.method === 'POST' && p === '/api/radar/wishlist') {
@@ -1028,6 +1132,54 @@ function createApp({ store, api, species, itemsCatalog }) {
         minMatrizIv: Number(store.config.tags?.matrizIv) || 150,
         minGoodQuality: 1.60
       }));
+    }
+    if (req.method === 'GET' && action === 'breeding-center') {
+      const center = await account.withAuth(token => api.breedingCenter(token));
+      return sendJson(res, 200, center);
+    }
+    if (req.method === 'GET' && action === 'breeding-quote') {
+      const parent1 = url.searchParams.get('parent1');
+      const parent2 = url.searchParams.get('parent2');
+      const free = url.searchParams.get('free') !== '0';
+      if (!parent1 || !parent2) throw httpError(400, 'Informe parent1 e parent2.');
+      const quote = await account.withAuth(token => api.breedingQuote(token, { parent1, parent2, free }));
+      return sendJson(res, 200, quote);
+    }
+    if (req.method === 'POST' && action === 'breeding-action') {
+      const body = await readBody(req);
+      const resData = await account.withAuth(token => api.breedingAction(token, body));
+      const actType = body?.action;
+      if (actType === 'hatch' || actType === 'hatch-now') {
+        const hatched = resData?.pokemon;
+        pushLog({
+          at: Date.now(),
+          account: account.id,
+          accountName: account.name,
+          text: `🐣 Ovo chocado na Creche: ${hatched ? `${hatched.shiny ? '✨ ' : ''}${hatched.name} (Q ${Number(hatched.quality || 1).toFixed(3)} · IV ${hatched.ivTotal || 0})` : 'Sucesso!'}`
+        });
+      } else if (actType === 'breed') {
+        pushLog({
+          at: Date.now(),
+          account: account.id,
+          accountName: account.name,
+          text: `🥚 Novo ovo colocado na incubadora (${body.free ? 'Free Breeding' : 'Strange Pheromones'}${body.double ? ' + Double Stones' : ''}).`
+        });
+      }
+      return sendJson(res, 200, resData);
+    }
+    if (req.method === 'POST' && action === 'breedbox-move') {
+      const body = await readBody(req);
+      const dir = body?.dir === 'out' ? 'out' : 'in';
+      const pokeIds = Array.isArray(body?.pokeIds) ? body.pokeIds : (body?.pokeId ? [body.pokeId] : []);
+      if (!pokeIds.length) throw httpError(400, 'Informe pokeIds para mover na Breeding Box.');
+      const sent = account.send({ type: 'breedbox-move', dir, pokeIds });
+      if (account.pokes) {
+        const idSet = new Set(pokeIds.map(String));
+        for (const pk of account.pokes) {
+          if (idSet.has(String(pk.id))) pk.breedingBox = dir === 'in';
+        }
+      }
+      return sendJson(res, 200, { ok: true, sent, dir, pokeIds });
     }
     if (req.method === 'GET' && action === 'bag') {
       const fresh = url.searchParams.get('fresh') === '1' || url.searchParams.get('force') === '1';
@@ -1116,6 +1268,7 @@ function createApp({ store, api, species, itemsCatalog }) {
   return {
     server,
     accounts,
+    highlights,
     getRouteRunner,
     addAccount,
     startAll() {

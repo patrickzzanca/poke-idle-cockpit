@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <defs>
+    <linearGradient id="redGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ff4d4d"/>
+      <stop offset="100%" stop-color="#dc2626"/>
+    </linearGradient>
+    <linearGradient id="whiteGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#e2e8f0"/>
+    </linearGradient>
+  </defs>
+  <!-- Outer border -->
+  <circle cx="50" cy="50" r="47" fill="#0f172a" stroke="#020617" stroke-width="3"/>
+  <!-- Top half (red) -->
+  <path d="M 6 50 A 44 44 0 0 1 94 50 Z" fill="url(#redGrad)"/>
+  <!-- Bottom half (white) -->
+  <path d="M 6 50 A 44 44 0 0 0 94 50 Z" fill="url(#whiteGrad)"/>
+  <!-- Center band -->
+  <rect x="6" y="45" width="88" height="10" fill="#0f172a"/>
+  <!-- Center button ring -->
+  <circle cx="50" cy="50" r="16" fill="#0f172a"/>
+  <!-- Center button white -->
+  <circle cx="50" cy="50" r="10" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+  <!-- Center button core -->
+  <circle cx="50" cy="50" r="5" fill="#f1f5f9" stroke="#cbd5e1" stroke-width="1"/>
+  <!-- Highlight shine on red dome -->
+  <ellipse cx="32" cy="24" rx="10" ry="5" transform="rotate(-30 32 24)" fill="rgba(255, 255, 255, 0.45)"/>
+</svg>

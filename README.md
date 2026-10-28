@@ -13,17 +13,20 @@ Painel de controle local e automação *headless* 24/7 para **[Poke Idle World](
   - Escuta em tempo real eventos de captura via WebSocket (`account.on('capture')`) e avança para a próxima hunt no milissegundo em que a meta for batida.
   - **Presets Dinâmicos:** 👑 Kanto: Não Capturados (Até Lv 499), 🌱 Kanto Speedrun (Lv 1 a 30), ⚡ Kanto Intermediário (Lv 1 a 80), 🌐 Global Não Capturados (Até Lv 499), Iniciais Kanto (Lv 1), Cavernas (Lv 10), Iniciais & Eevee (Lv 20) e Dragões (Lv 20-30). Detecção imediata de hunts inexistentes (`field-none`) com avanço instantâneo.
   - Watchdog de tempo máximo por hunt (3, 5 ou 10 min) e retorno automático à hunt base ao terminar ou pausar.
-- **🎒 Bag / Inventário & Mercado de Itens:**
-  - Visualização completa da Bag (Doces, Pedras, Essências, Pokébolas e Loots).
+- **🎒 Bag / Inventário & Mercado de Itens (Market v3):**
+  - Visualização completa da Bag (Doces, Pedras, Essências, Pokébolas e Loots) com proxy e cache local de ícones (`/assets/*` em `.cache/assets/`).
   - **⚡ Venda Rápida:** Anúncio em lote com 1 clique calculando automaticamente $1 a menos que o menor preço ativo concorrente (respeitando o piso mínimo do NPC).
   - **🏷️ Precificação Manual:** Modal com cotações em tempo real de Gold e Diamantes (Menor preço, Mediana, Média e Volume de oferta) e botões de atalho (Undercut, Igualar Mínimo, Mediana).
-  - Gestão e cancelamento instantâneo de anúncios próprios ativos.
+  - **⏳ Auditoria de Anúncios Ativos:** Identifica automaticamente anúncios parados há mais de 24h (`⏳ +1 dia`) ou superados pela concorrência (`⚠️ Superado`), com botão de 1 clique **⚡ Repostar no Piso** (`POST /api/market/repost-item`).
+- **🧬 Calculadora, Bancada & Incubadora ao Vivo de Breeder (v1.9+):**
+  - Simulador fiel às regras oficiais da Creche do Poke Idle World (mesma espécie, bloqueio de Iniciais e Ditto, $\Delta Q \le 0.150$ para normais, herança obrigatória de IVs/Quality do pai Shiny com Feromônios e `partnerExcess`).
+  - Integração ao vivo com `/api/game/breeding` para acompanhar e chocar ovos da Incubadora, mover Pokémon para a `📦 Breeding Box` e iniciar cruzas direto pelo painel.
 - **🎯 Radar & Wishlist de Mercado:**
   - Varredura em tempo real dos anúncios de Pokémon com filtros por Espécie, Shiny, Qualidade mínima, IV mínimo e teto de preço.
   - Tickers em tempo real de commodities do jogo (Diamantes e Strange Pheromone).
   - Alertas sonoros (Web Audio API) no navegador.
 - **🔔 Notificações no Discord:**
-  - ⭐ **Destaques e Capturas de Alto Valor:** Notificações filtradas para Pokémons com Qualidade ≥ 1.70 e IV Total ≥ 130.
+  - ⭐ **Destaques e Capturas de Alto Valor:** Notificações filtradas para Pokémons com **Qualidade ≥ 1.70 e IV Total ≥ 150** (ou Ditto).
   - ⚠️ **Alertas de Suprimentos:** Avisa quando as Pokébolas de auto-captura acabarem ou quando a Box atingir 90% da capacidade.
 - **⏳ Estimativas Inteligentes:**
   - Cálculo dinâmico do tempo até esgotar as Pokébolas ativas (ex: `esgota em ~8h 20m`).
